@@ -13,6 +13,18 @@ set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
+# The test targets compile under the project's full warning set with -Werror.
+# GoogleTest's headers are not warning-clean against -Wconversion on every
+# compiler we build with, and a red CI run caused by a dependency's headers
+# teaches people to stop reading CI output. Marking the include directories as
+# SYSTEM suppresses diagnostics from those headers without weakening the
+# warnings applied to our own code.
+foreach(gtest_target IN ITEMS gtest gtest_main)
+    get_target_property(gtest_includes ${gtest_target} INTERFACE_INCLUDE_DIRECTORIES)
+    set_target_properties(${gtest_target} PROPERTIES
+        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${gtest_includes}")
+endforeach()
+
 add_executable(xc_tests
     test_build_info.cpp
 )
