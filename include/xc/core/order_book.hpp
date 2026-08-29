@@ -47,6 +47,28 @@ struct CancelResult {
     constexpr bool accepted() const noexcept { return reject == RejectReason::None; }
 };
 
+/// Outcome of amending a resting order.
+struct ReplaceResult {
+    RejectReason reject = RejectReason::None;
+
+    /// True when the amendment kept the order's place in its queue. False when
+    /// it was re-queued behind everything already resting at its price.
+    bool priority_retained = false;
+
+    /// The order as it stood before the amendment.
+    Order previous;
+
+    /// Set when a re-queued amendment crossed and traded on its way back in.
+    Quantity filled = 0;
+    Quantity stp_cancelled = 0;
+
+    /// True when a remainder is resting after the amendment. False when the
+    /// amendment consumed or cancelled the order outright.
+    bool rested = false;
+
+    constexpr bool accepted() const noexcept { return reject == RejectReason::None; }
+};
+
 /// A price-time priority limit order book for a single instrument.
 ///
 /// Orders are ranked first by price and then, within a price, by the order in
@@ -79,6 +101,29 @@ class OrderBook {
 
     /// Removes a resting order. Rejects with UnknownOrder if it is not live.
     CancelResult cancel(OrderId id);
+
+    /// Amends a resting order's price or quantity.
+    ///
+    /// `new_quantity` is the order's new *total* size, counted from original
+    /// submission, which is how venues express an amendment: a client that has
+    /// been filled for 30 of 100 and amends to 50 is asking to trade 20 more,
+    /// not 50 more.
+    ///
+    /// Whether the order keeps its place in the queue follows the rule real
+    /// venues use, and the reasoning is about fairness rather than convenience.
+    /// Reducing size at the same price only ever gives up queue position that
+    /// was already earned, so priority is retained. Raising size or moving the
+    /// price asks for a better position than the order paid for, and the
+    /// amendment goes to the back of its level. Without that rule an order
+    /// could hold the front of the queue indefinitely with a single lot and
+    /// inflate itself the instant it was about to be filled.
+    ///
+    /// A re-queued amendment is a genuinely new arrival, so it can cross and
+    /// trade immediately, and it needs the sequence number the engine would
+    /// have given a fresh order -- priority is defined by that sequence, not by
+    /// a timestamp.
+    ReplaceResult replace(OrderId id, Price new_price, Quantity new_quantity, SeqNum new_sequence,
+                          Nanos now, std::vector<Fill>& fills);
 
     /// Best price on each side, or nullopt when that side is empty.
     std::optional<Price> best_bid() const;
@@ -125,6 +170,11 @@ class OrderBook {
 
     /// True when this order would take liquidity on arrival.
     bool would_cross(const Order& order) const;
+
+    /// Matches and rests an order whose `remaining` is already set to what it
+    /// is asking to trade. Shared by submission and by re-queued amendments,
+    /// which arrive having already been partially filled.
+    SubmitResult insert(Order order, std::vector<Fill>& fills);
 
     void rest(Order& order);
     RejectReason validate(const Order& order) const;

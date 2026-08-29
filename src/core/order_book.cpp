@@ -212,13 +212,24 @@ void OrderBook::rest(Order& order) {
 }
 
 SubmitResult OrderBook::submit(Order order, std::vector<Fill>& fills) {
+    // A newly submitted order has traded nothing yet.
+    order.remaining = order.quantity;
+    return insert(order, fills);
+}
+
+SubmitResult OrderBook::insert(Order order, std::vector<Fill>& fills) {
     SubmitResult result;
     result.reject = validate(order);
     if (!result.accepted()) {
         return result;
     }
 
-    order.remaining = order.quantity;
+    // What this order is still asking to trade. For a fresh submission that is
+    // its whole size; for a re-queued amendment it is the part that has not
+    // already been filled. Everything below works from this rather than from
+    // `quantity`, which stays as the client's cumulative total so that a later
+    // amendment can still be interpreted against it.
+    const Quantity requested = order.remaining;
 
     // Post-only is checked before matching rather than after. A market maker
     // sends these because paying the spread would invert its economics, so the
@@ -253,9 +264,9 @@ SubmitResult OrderBook::submit(Order order, std::vector<Fill>& fills) {
     // extra walk over the crossing levels and makes the failure path a genuine
     // no-op.
     if (order.tif == TimeInForce::FillOrKill) {
-        const Quantity available = buying ? fillable(asks_, crosses, order.quantity, order.account)
-                                          : fillable(bids_, crosses, order.quantity, order.account);
-        if (available < order.quantity) {
+        const Quantity available = buying ? fillable(asks_, crosses, requested, order.account)
+                                          : fillable(bids_, crosses, requested, order.account);
+        if (available < requested) {
             result.reject = RejectReason::FillOrKillUnfillable;
             return result;
         }
@@ -269,7 +280,7 @@ SubmitResult OrderBook::submit(Order order, std::vector<Fill>& fills) {
     // Quantity removed by self-trade prevention never printed a trade, so it
     // has to come out of the filled figure or a client reconciling fills
     // against its own position would come up short.
-    result.filled = order.quantity - order.remaining - result.stp_cancelled;
+    result.filled = requested - order.remaining - result.stp_cancelled;
 
     if (order.remaining == 0) {
         return result;
@@ -323,6 +334,87 @@ CancelResult OrderBook::cancel(OrderId id) {
 
     index_.erase(it);
     pool_.release(handle);
+    return result;
+}
+
+ReplaceResult OrderBook::replace(OrderId id, Price new_price, Quantity new_quantity,
+                                 SeqNum new_sequence, Nanos now, std::vector<Fill>& fills) {
+    ReplaceResult result;
+
+    const auto it = index_.find(id);
+    if (it == index_.end()) {
+        result.reject = RejectReason::UnknownOrder;
+        return result;
+    }
+
+    const OrderHandle handle = it->second;
+    const Order previous = pool_[handle];
+    result.previous = previous;
+
+    if (!instrument_.is_valid_price(new_price)) {
+        result.reject = RejectReason::InvalidPrice;
+        return result;
+    }
+    if (!instrument_.is_valid_quantity(new_quantity)) {
+        result.reject = RejectReason::InvalidQuantity;
+        return result;
+    }
+
+    // An amendment down to at or below what has already traded cannot be
+    // honoured as a reduction -- the fills have happened. The order is
+    // cancelled instead, which is what the client is really asking for when it
+    // says "I no longer want more than this much" and it already has that much.
+    if (new_quantity <= previous.filled()) {
+        cancel(id);
+        result.rested = false;
+        result.priority_retained = false;
+        return result;
+    }
+
+    const bool same_price = new_price == previous.price;
+    const bool reducing = new_quantity < previous.quantity;
+
+    if (same_price && reducing) {
+        // Retained priority: the order stays exactly where it is in the queue
+        // and only its size changes. Nothing is unlinked, so this is the
+        // cheapest amendment and the common one.
+        PriceLevel& level = previous.is_buy() ? bids_.find(previous.price)->second
+                                              : asks_.find(previous.price)->second;
+        Order& resting = pool_[handle];
+        const Quantity new_remaining = new_quantity - previous.filled();
+        assert(resting.remaining >= new_remaining && "reduction increased the resting quantity");
+        level.reduce(resting.remaining - new_remaining);
+        resting.quantity = new_quantity;
+        resting.remaining = new_remaining;
+
+        result.priority_retained = true;
+        result.rested = true;
+        return result;
+    }
+
+    // Everything else is a fresh arrival: the old order comes off the book and
+    // the amendment goes back in at the tail of its level, where it can cross
+    // and trade like any other incoming order.
+    const CancelResult removed = cancel(id);
+    assert(removed.accepted() && "indexed order could not be cancelled");
+    (void)removed;
+
+    Order amended = previous;
+    amended.price = new_price;
+    amended.quantity = new_quantity;
+    amended.remaining = new_quantity - previous.filled();
+    amended.sequence = new_sequence;
+    amended.accepted_at = now;
+
+    // insert() rather than submit(): the amendment carries its earlier fills
+    // with it, so its remaining quantity must survive rather than being reset
+    // to its cumulative total.
+    const SubmitResult resubmitted = insert(amended, fills);
+    result.reject = resubmitted.reject;
+    result.filled = resubmitted.filled;
+    result.stp_cancelled = resubmitted.stp_cancelled;
+    result.rested = resubmitted.rested;
+    result.priority_retained = false;
     return result;
 }
 
