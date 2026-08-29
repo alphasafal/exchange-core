@@ -110,12 +110,26 @@ fi
         echo "cost of the guarantee, measured rather than estimated."
         echo
         for policy in none interval always; do
+            # Each policy gets a sample count matched to its cost. Persisting on
+            # every record puts a device round trip of roughly a millisecond on
+            # the command path, so a run sized for the in-memory case would take
+            # hours -- and would not be more accurate. A few thousand samples
+            # characterise a millisecond operation perfectly well; the sample
+            # count is printed with the result so the difference is visible
+            # rather than hidden.
+            case "${policy}" in
+                always)   policy_orders=$(( ORDERS / 500 )); ;;
+                interval) policy_orders=$(( ORDERS / 10 )); ;;
+                *)        policy_orders=$(( ORDERS / 10 )); ;;
+            esac
+            [[ "${policy_orders}" -lt 1000 ]] && policy_orders=1000
+
             journal_dir="$(mktemp -d)"
             echo "### durability: ${policy}"
             echo
             echo '```'
-            "${BUILD_DIR}/bench/bench_matching" --orders "$(( ORDERS / 10 ))" \
-                --warmup "$(( WARMUP / 10 ))" --journal "${journal_dir}" \
+            "${BUILD_DIR}/bench/bench_matching" --orders "${policy_orders}" \
+                --warmup 1000 --journal "${journal_dir}" \
                 --durability "${policy}" | sed -n '/^throughput/,$p'
             echo '```'
             echo
