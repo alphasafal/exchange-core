@@ -1,0 +1,14 @@
+build/
+var/
+.cache/
+compile_commands.json
+*.o
+*.a
+*.dSYM/
+.DS_Store
+perf.data*
+*.profraw
+*.profdata
+crash-*
+leak-*
+timeout-*

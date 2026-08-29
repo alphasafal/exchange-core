@@ -1,0 +1,69 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 22, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": { "XC_WERROR": "ON" }
+    },
+    {
+      "name": "release",
+      "inherits": "base",
+      "displayName": "Release (-O2, portable)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "native",
+      "inherits": "base",
+      "displayName": "Release tuned for this machine (benchmarks)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "XC_NATIVE_ARCH": "ON" }
+    },
+    {
+      "name": "debug",
+      "inherits": "base",
+      "displayName": "Debug (-O0 -g, assertions on)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "asan",
+      "inherits": "base",
+      "displayName": "AddressSanitizer",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "XC_SANITIZER": "address" }
+    },
+    {
+      "name": "ubsan",
+      "inherits": "base",
+      "displayName": "UndefinedBehaviorSanitizer",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "XC_SANITIZER": "undefined" }
+    },
+    {
+      "name": "tsan",
+      "inherits": "base",
+      "displayName": "ThreadSanitizer",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "XC_SANITIZER": "thread" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "release", "configurePreset": "release" },
+    { "name": "native",  "configurePreset": "native"  },
+    { "name": "debug",   "configurePreset": "debug"   },
+    { "name": "asan",    "configurePreset": "asan"    },
+    { "name": "ubsan",   "configurePreset": "ubsan"   },
+    { "name": "tsan",    "configurePreset": "tsan"    }
+  ],
+  "testPresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    { "name": "release", "inherits": "base", "configurePreset": "release" },
+    { "name": "debug",   "inherits": "base", "configurePreset": "debug"   },
+    { "name": "asan",    "inherits": "base", "configurePreset": "asan"    },
+    { "name": "ubsan",   "inherits": "base", "configurePreset": "ubsan"   },
+    { "name": "tsan",    "inherits": "base", "configurePreset": "tsan"    }
+  ]
+}
