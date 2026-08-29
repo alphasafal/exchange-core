@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "xc/core/depth.hpp"
 #include "xc/core/fill.hpp"
 #include "xc/core/instrument.hpp"
 #include "xc/core/order.hpp"
@@ -124,6 +125,20 @@ class OrderBook {
     /// a timestamp.
     ReplaceResult replace(OrderId id, Price new_price, Quantity new_quantity, SeqNum new_sequence,
                           Nanos now, std::vector<Fill>& fills);
+
+    /// The best bid and offer in one read. Cheaper than calling best_bid() and
+    /// best_ask() separately and, more importantly, guaranteed to describe a
+    /// single consistent instant.
+    TopOfBook top_of_book() const;
+
+    /// Fills `out` with up to `max_levels` aggregated levels per side, best
+    /// price first.
+    ///
+    /// Takes its destination by reference rather than returning one so that a
+    /// publisher can reuse the same buffers on every book change. `out` is
+    /// cleared without releasing its capacity, so after a short warmup this
+    /// path performs no allocation at all.
+    void depth(std::size_t max_levels, DepthSnapshot& out) const;
 
     /// Best price on each side, or nullopt when that side is empty.
     std::optional<Price> best_bid() const;

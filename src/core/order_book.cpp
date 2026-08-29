@@ -418,6 +418,45 @@ ReplaceResult OrderBook::replace(OrderId id, Price new_price, Quantity new_quant
     return result;
 }
 
+TopOfBook OrderBook::top_of_book() const {
+    TopOfBook top;
+    top.instrument = instrument_.id;
+    if (!bids_.empty()) {
+        const auto& [price, level] = *bids_.begin();
+        top.bid_price = price;
+        top.bid_quantity = level.total_quantity();
+    }
+    if (!asks_.empty()) {
+        const auto& [price, level] = *asks_.begin();
+        top.ask_price = price;
+        top.ask_quantity = level.total_quantity();
+    }
+    return top;
+}
+
+void OrderBook::depth(std::size_t max_levels, DepthSnapshot& out) const {
+    out.instrument = instrument_.id;
+    out.clear();
+    out.bids.reserve(max_levels);
+    out.asks.reserve(max_levels);
+
+    // Both maps are already ordered best-price-first, so this is a truncated
+    // in-order walk. Level totals are maintained incrementally as orders rest
+    // and fill, so no level's queue is traversed here however deep it is.
+    for (const auto& [price, level] : bids_) {
+        if (out.bids.size() >= max_levels) {
+            break;
+        }
+        out.bids.push_back(DepthLevel{price, level.total_quantity(), level.order_count()});
+    }
+    for (const auto& [price, level] : asks_) {
+        if (out.asks.size() >= max_levels) {
+            break;
+        }
+        out.asks.push_back(DepthLevel{price, level.total_quantity(), level.order_count()});
+    }
+}
+
 std::optional<Price> OrderBook::best_bid() const {
     if (bids_.empty()) {
         return std::nullopt;
