@@ -18,8 +18,14 @@ struct Order {
     /// Limit price in ticks. Ignored for market orders, which carry kNoPrice.
     Price price = kNoPrice;
 
-    /// Quantity as submitted. Never modified after acceptance, so that a fill
-    /// report can always state what fraction of the original order traded.
+    /// Quantity the order is working.
+    ///
+    /// Normally this is what was submitted and never changes, so that a fill
+    /// report can state what fraction of the original order traded. The one
+    /// exception is self-trade prevention under the decrement-both policy,
+    /// which withdraws quantity from the order rather than executing it: there,
+    /// both this and `remaining` shrink together, so that filled() keeps
+    /// meaning "traded" and never counts quantity that was destroyed.
     Quantity quantity = 0;
 
     /// Quantity still available to trade. Only this field moves during matching.

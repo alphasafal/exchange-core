@@ -165,11 +165,20 @@ void OrderBook::match(Levels& levels, Order& incoming, Crosses crosses, std::vec
 
                     case SelfTradePolicy::DecrementBoth: {
                         // Both sides shrink by the overlap and no trade prints.
-                        // Nothing changed hands, so this must never reach the
-                        // tape or a position calculation.
+                        //
+                        // The original quantity shrinks too, not just the
+                        // remainder. filled() is quantity minus remaining, so
+                        // decrementing only the remainder would make an order
+                        // report quantity it never traded -- and a client
+                        // reconciling its fills against that figure would
+                        // disagree with the venue about its own position.
+                        // Prevention withdraws quantity from the order; it does
+                        // not execute it.
                         const Quantity overlap = std::min(incoming.remaining, resting.remaining);
                         incoming.remaining -= overlap;
+                        incoming.quantity -= overlap;
                         resting.remaining -= overlap;
+                        resting.quantity -= overlap;
                         level.reduce(overlap);
                         stp_cancelled += overlap;
                         if (resting.remaining == 0) {

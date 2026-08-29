@@ -155,6 +155,31 @@ TEST(SelfTrade, DecrementBothRemovesARestingOrderItFullyConsumes) {
     EXPECT_EQ(book.quantity_at(Side::Buy, 100), 5u);
 }
 
+TEST(SelfTrade, DecrementBothWithdrawsQuantityRatherThanReportingItAsFilled) {
+    OrderBook book{with_policy(SelfTradePolicy::DecrementBoth)};
+    OrderFactory make;
+    std::vector<Fill> fills;
+
+    book.submit(make.limit(1, Side::Sell, 100, 100, kFirm), fills);
+    book.submit(make.limit(2, Side::Buy, 100, 30, kFirm), fills);
+    ASSERT_TRUE(fills.empty());
+
+    // The resting order lost 30 lots to prevention, and traded none of them.
+    // Reporting them as filled would put the client's position 30 lots away
+    // from the venue's, with no execution anywhere to explain the difference.
+    const Order* resting = book.find(OrderId{1});
+    ASSERT_NE(resting, nullptr);
+    EXPECT_EQ(resting->remaining, 70u);
+    EXPECT_EQ(resting->quantity, 70u) << "the working quantity shrank with the remainder";
+    EXPECT_EQ(resting->filled(), 0u) << "nothing traded, so nothing is filled";
+
+    // Once it does trade, filled() counts only that.
+    book.submit(make.limit(3, Side::Buy, 100, 20, kOther), fills);
+    ASSERT_EQ(fills.size(), 1u);
+    EXPECT_EQ(book.find(OrderId{1})->filled(), 20u);
+    EXPECT_EQ(book.find(OrderId{1})->remaining, 50u);
+}
+
 // --- Self-trade prevention interacting with fill-or-kill -------------------
 
 TEST(SelfTrade, FillOrKillDoesNotCountLiquidityBlockedByCancelIncoming) {

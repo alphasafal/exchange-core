@@ -79,9 +79,14 @@ SubmitResult ReferenceBook::match(Order& incoming, std::vector<Fill>& fills) {
                 incoming.remaining = 0;
                 remove(slot);
             } else {  // DecrementBoth
+                // Withdraws quantity from both orders rather than executing it,
+                // so the original quantity shrinks alongside the remainder and
+                // filled() keeps meaning "traded".
                 const Quantity overlap = std::min(incoming.remaining, resting.remaining);
                 incoming.remaining -= overlap;
+                incoming.quantity -= overlap;
                 resting.remaining -= overlap;
+                resting.quantity -= overlap;
                 result.stp_cancelled += overlap;
                 if (resting.remaining == 0) {
                     remove(slot);
