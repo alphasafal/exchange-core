@@ -41,6 +41,7 @@ add_executable(xc_tests
     test_risk_collar_and_rate.cpp
     test_kill_switch.cpp
     test_engine_risk.cpp
+    test_byte_codec.cpp
     test_journal_record.cpp
     test_journal_io.cpp
     test_replay.cpp
