@@ -23,11 +23,17 @@ void put(std::vector<std::uint8_t>& out, T value) {
 
 template<typename T>
 T get(std::span<const std::uint8_t> data, std::size_t offset) {
-    T value = 0;
+    // Accumulated in the widest unsigned type and narrowed once at the end.
+    //
+    // Accumulating directly into a narrow T instead looks equivalent and is
+    // not: integer promotion widens the shift to int, so the compound
+    // assignment is an implicit narrowing on every iteration. Clang says
+    // nothing; GCC rejects it under -Wconversion, which is how this was found.
+    std::uint64_t value = 0;
     for (std::size_t i = 0; i < sizeof(T); ++i) {
-        value |= static_cast<T>(data[offset + i]) << (8 * i);
+        value |= static_cast<std::uint64_t>(data[offset + i]) << (8 * i);
     }
-    return value;
+    return static_cast<T>(value);
 }
 
 void put_string(std::vector<std::uint8_t>& out, const std::string& value) {
