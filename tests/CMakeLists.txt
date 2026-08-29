@@ -39,6 +39,7 @@ add_executable(xc_tests
     test_matching_engine.cpp
     test_risk_limits.cpp
     test_risk_collar_and_rate.cpp
+    test_kill_switch.cpp
 )
 target_link_libraries(xc_tests PRIVATE xc::core GTest::gtest_main)
 target_include_directories(xc_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
