@@ -127,6 +127,10 @@ target_compile_definitions(xc_alloc_counter PRIVATE XC_COUNT_ALLOCATIONS)
 
 add_subdirectory(apps)
 
+if(XC_BUILD_BENCH)
+    add_subdirectory(bench)
+endif()
+
 if(XC_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
