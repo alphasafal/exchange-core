@@ -82,7 +82,9 @@ add_library(xc_core STATIC
     src/core/order_book.cpp
     src/core/order_pool.cpp
     src/core/price_level.cpp
+    src/journal/reader.cpp
     src/journal/record.cpp
+    src/journal/writer.cpp
     src/risk/kill_switch.cpp
     src/risk/risk_engine.cpp
     src/util/build_info.cpp
