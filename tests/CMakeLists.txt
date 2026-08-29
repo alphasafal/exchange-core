@@ -27,6 +27,7 @@ endforeach()
 
 add_executable(xc_tests
     test_build_info.cpp
+    test_types.cpp
 )
 target_link_libraries(xc_tests PRIVATE xc::core GTest::gtest_main)
 
