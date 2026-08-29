@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <vector>
 
@@ -141,16 +142,37 @@ struct Harness {
         return predicate();
     }
 
-    std::vector<protocol::Message> drain_feed() {
+    /// Collects feed datagrams until `enough` is satisfied or the budget runs
+    /// out.
+    ///
+    /// A single non-blocking pass is not sufficient and the difference is a
+    /// real race, not test pedantry: the session reply travels over TCP and the
+    /// trade over UDP, and nothing synchronises the two. Waiting for the TCP
+    /// reply says nothing about whether the datagram has reached the
+    /// subscriber's socket buffer yet, so draining once produces a test that
+    /// passes on an idle machine and fails on a loaded one.
+    template<typename Predicate>
+    std::vector<protocol::Message> collect_feed(Predicate enough, int iterations = 300) {
         std::vector<protocol::Message> messages;
         std::vector<std::uint8_t> datagram;
-        while (subscriber->receive(datagram)) {
-            const protocol::DecodeResult decoded = protocol::decode(datagram);
-            if (decoded.status == protocol::DecodeStatus::Ok) {
-                messages.push_back(decoded.message);
+        for (int i = 0; i < iterations; ++i) {
+            while (subscriber->receive(datagram)) {
+                const protocol::DecodeResult decoded = protocol::decode(datagram);
+                if (decoded.status == protocol::DecodeStatus::Ok) {
+                    messages.push_back(decoded.message);
+                }
             }
+            if (enough(messages)) {
+                break;
+            }
+            venue->poll(1);
         }
         return messages;
+    }
+
+    /// Collects whatever has arrived, after giving the feed a chance to settle.
+    std::vector<protocol::Message> drain_feed() {
+        return collect_feed([](const std::vector<protocol::Message>&) { return false; }, 50);
     }
 
     TempDir journal_dir;
@@ -237,7 +259,12 @@ TEST(VenueEndToEnd, MatchesTwoClientsAndReportsToBothChannels) {
     EXPECT_EQ(execution->fill.quantity, 40u);
 
     // ...and the trade is on the public feed for every subscriber.
-    const std::vector<protocol::Message> feed = harness.drain_feed();
+    const auto has_trade = [](const std::vector<protocol::Message>& messages) {
+        return std::any_of(messages.begin(), messages.end(), [](const protocol::Message& m) {
+            return m.type == protocol::MessageType::Trade;
+        });
+    };
+    const std::vector<protocol::Message> feed = harness.collect_feed(has_trade);
     const auto trade = std::find_if(feed.begin(), feed.end(), [](const protocol::Message& m) {
         return m.type == protocol::MessageType::Trade;
     });
@@ -256,8 +283,9 @@ TEST(VenueEndToEnd, PublishesAGapFreeFeedSequence) {
 
     std::vector<std::uint8_t> batch;
     for (std::uint64_t i = 1; i <= 30; ++i) {
-        protocol::encode_new_order(
-            batch, i, order(i, 100, i % 2 == 0 ? Side::Buy : Side::Sell, 10'000 + (i % 5), 10));
+        protocol::encode_new_order(batch, i,
+                                   order(i, 100, i % 2 == 0 ? Side::Buy : Side::Sell,
+                                         10'000 + static_cast<Price>(i % 5), 10));
     }
     ASSERT_TRUE(client.send_all(batch));
     ASSERT_TRUE(harness.pump_until([&] { return harness.venue->commands_processed() == 30; }));
@@ -267,7 +295,9 @@ TEST(VenueEndToEnd, PublishesAGapFreeFeedSequence) {
     // numbering, not the network's.
     protocol::GapDetector detector;
     std::size_t seen = 0;
-    for (const protocol::Message& message : harness.drain_feed()) {
+    const std::vector<protocol::Message> feed = harness.collect_feed(
+        [](const std::vector<protocol::Message>& messages) { return messages.size() >= 30; });
+    for (const protocol::Message& message : feed) {
         EXPECT_EQ(detector.observe(message.sequence), protocol::SequenceCheck::InOrder)
             << "at feed sequence " << message.sequence;
         ++seen;
@@ -330,9 +360,9 @@ TEST(VenueEndToEnd, JournalsWhatItMatchedAndReplaysToTheSameState) {
     std::vector<std::uint8_t> sells;
     for (std::uint64_t i = 1; i <= 40; ++i) {
         const bool buying = i % 2 == 0;
-        protocol::encode_new_order(
-            buying ? buys : sells, i,
-            order(i, buying ? 100 : 200, buying ? Side::Buy : Side::Sell, 10'000 + (i % 7), 10));
+        protocol::encode_new_order(buying ? buys : sells, i,
+                                   order(i, buying ? 100 : 200, buying ? Side::Buy : Side::Sell,
+                                         10'000 + static_cast<Price>(i % 7), 10));
     }
     ASSERT_TRUE(seller.send_all(sells));
     ASSERT_TRUE(buyer.send_all(buys));
