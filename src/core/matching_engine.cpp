@@ -1,5 +1,7 @@
 #include "xc/core/matching_engine.hpp"
 
+#include <algorithm>
+
 #include <utility>
 
 namespace xc {
@@ -49,9 +51,50 @@ bool MatchingEngine::add_instrument(const Instrument& instrument) {
     if (books_.contains(instrument.id) || symbols_.contains(instrument.symbol)) {
         return false;
     }
+    // An instrument becoming tradable is an event in the venue's total order,
+    // so it takes a sequence number like any other -- and unconditionally,
+    // whether or not a journal is attached. If numbering depended on the
+    // journal being enabled, the same command stream would produce different
+    // sequence numbers with logging on and off, and a journaled run could never
+    // be compared against an unjournaled one.
+    const SeqNum sequence = next_sequence();
+
+    // Journaled before the instrument becomes usable, so that a replay rebuilds
+    // the venue's configuration from the log rather than trusting a config file
+    // that may have been edited since the run it is replaying.
+    if (journal_ != nullptr) {
+        journal::Record record;
+        record.type = journal::RecordType::InstrumentDefined;
+        record.sequence = sequence;
+        record.timestamp = clock_.now();
+        record.instrument = instrument;
+        if (!journal_->append(record, record.timestamp)) {
+            return false;
+        }
+    }
+
     symbols_.emplace(instrument.symbol, instrument.id);
     books_.emplace(instrument.id, std::make_unique<OrderBook>(instrument));
+
+    instrument_order_.push_back(instrument.id);
+    std::sort(instrument_order_.begin(), instrument_order_.end());
     return true;
+}
+
+bool MatchingEngine::journal_command(const journal::Record& record, Nanos now) {
+    if (journal_ == nullptr) {
+        return true;
+    }
+    if (journal_->append(record, now)) {
+        return true;
+    }
+    // A command that could not be recorded must not be executed. Halting the
+    // venue is severe, and it is the correct response: every trade from here on
+    // would be one no replay could reproduce.
+    if (kill_ != nullptr) {
+        kill_->halt_venue(risk::HaltReason::RiskBreach, now);
+    }
+    return false;
 }
 
 const Instrument* MatchingEngine::find_instrument(InstrumentId id) const {
@@ -82,9 +125,6 @@ void MatchingEngine::add_listener(EngineListener* listener) {
 
 SubmitOutcome MatchingEngine::submit(const NewOrder& command) {
     SubmitOutcome outcome;
-    // Stamped before anything is decided, so the ordering does not depend on
-    // the outcome. See the note on the class.
-    outcome.sequence = next_sequence();
     fills_.clear();
     withdrawals_.clear();
 
@@ -122,6 +162,26 @@ SubmitOutcome MatchingEngine::submit(const NewOrder& command) {
             }
             return outcome;
         }
+    }
+
+    // The sequence number is assigned here: after every gate that could turn
+    // the command away without touching the book, and immediately before the
+    // command is journaled. Sequencing earlier would leave a gap in the
+    // journal's numbering for every rejected command, and a gap in a journal
+    // has to mean data loss -- if it can also mean "that one was rejected",
+    // recovery has no way to tell the two apart.
+    outcome.sequence = next_sequence();
+
+    scratch_record_.type = journal::RecordType::NewOrder;
+    scratch_record_.sequence = outcome.sequence;
+    scratch_record_.timestamp = now;
+    scratch_record_.new_order = command;
+    if (!journal_command(scratch_record_, now)) {
+        outcome.reject = RejectReason::Halted;
+        for (EngineListener* listener : listeners_) {
+            listener->on_order_rejected(outcome.sequence, command, outcome.reject);
+        }
+        return outcome;
     }
 
     Order order;
@@ -176,7 +236,6 @@ SubmitOutcome MatchingEngine::submit(const NewOrder& command) {
 
 CancelOutcome MatchingEngine::cancel(const CancelOrder& command) {
     CancelOutcome outcome;
-    outcome.sequence = next_sequence();
     fills_.clear();
     withdrawals_.clear();
 
@@ -192,6 +251,17 @@ CancelOutcome MatchingEngine::cancel(const CancelOrder& command) {
     // order exists leaks the shape of the book to anyone willing to guess ids.
     if (resting == nullptr || resting->account != command.account) {
         outcome.reject = RejectReason::UnknownOrder;
+        return outcome;
+    }
+
+    const Nanos now = clock_.now();
+    outcome.sequence = next_sequence();
+    scratch_record_.type = journal::RecordType::CancelOrder;
+    scratch_record_.sequence = outcome.sequence;
+    scratch_record_.timestamp = now;
+    scratch_record_.cancel_order = command;
+    if (!journal_command(scratch_record_, now)) {
+        outcome.reject = RejectReason::Halted;
         return outcome;
     }
 
@@ -211,7 +281,6 @@ CancelOutcome MatchingEngine::cancel(const CancelOrder& command) {
 
 ReplaceOutcome MatchingEngine::replace(const ReplaceOrder& command) {
     ReplaceOutcome outcome;
-    outcome.sequence = next_sequence();
     fills_.clear();
     withdrawals_.clear();
 
@@ -227,6 +296,17 @@ ReplaceOutcome MatchingEngine::replace(const ReplaceOrder& command) {
         return outcome;
     }
 
+    const Nanos now = clock_.now();
+    outcome.sequence = next_sequence();
+    scratch_record_.type = journal::RecordType::ReplaceOrder;
+    scratch_record_.sequence = outcome.sequence;
+    scratch_record_.timestamp = now;
+    scratch_record_.replace_order = command;
+    if (!journal_command(scratch_record_, now)) {
+        outcome.reject = RejectReason::Halted;
+        return outcome;
+    }
+
     // Released before the amendment runs and re-recorded afterwards, so that
     // both paths -- an in-place reduction and a full re-queue -- settle through
     // the same code. Trying to compute a delta for the in-place case would mean
@@ -239,8 +319,8 @@ ReplaceOutcome MatchingEngine::replace(const ReplaceOrder& command) {
     }
 
     static_cast<ReplaceResult&>(outcome) =
-        target->replace(command.id, command.new_price, command.new_quantity, outcome.sequence,
-                        clock_.now(), fills_, &withdrawals_);
+        target->replace(command.id, command.new_price, command.new_quantity, outcome.sequence, now,
+                        fills_, &withdrawals_);
 
     if (!outcome.accepted()) {
         // The amendment was refused and the order is untouched, so the exposure

@@ -28,6 +28,16 @@ enum class RecoveryOutcome : std::uint8_t {
     /// mismatch, and the records after it cannot be trusted to be findable.
     Damaged,
 
+    /// The sequence numbers jumped.
+    ///
+    /// The engine numbers journaled commands consecutively, so a journal's
+    /// sequence numbers are gap-free by construction. A jump therefore has
+    /// exactly one meaning -- records are missing -- most often a segment file
+    /// that was deleted, archived, or never copied. Recovering the remainder
+    /// would produce a book that never existed, built from the surviving
+    /// commands of a stream that had others in the middle.
+    SequenceGap,
+
     /// A segment could not be read at all.
     Unreadable,
 };
@@ -47,8 +57,15 @@ struct RecoveryReport {
     std::filesystem::path damaged_segment;
     std::uint64_t good_bytes_in_damaged_segment = 0;
 
+    /// Sequence number the next record was expected to carry, when the outcome
+    /// is SequenceGap.
+    SeqNum expected_sequence = 0;
+
     std::string message;
 
+    /// True when the recovered state is a state the venue genuinely passed
+    /// through. A torn tail qualifies: it is the venue one command short of
+    /// where it stopped. Damage and gaps do not.
     bool usable() const noexcept {
         return outcome == RecoveryOutcome::Clean || outcome == RecoveryOutcome::TornTail;
     }
@@ -65,8 +82,14 @@ class JournalReader {
     explicit JournalReader(std::filesystem::path directory);
 
     /// Visits every recoverable record, in order, stopping at the first
-    /// damaged or incomplete one.
-    RecoveryReport read(const std::function<void(const Record&)>& visit);
+    /// damaged, incomplete or out-of-sequence one.
+    ///
+    /// `expected_first_sequence` is the number the first record should carry.
+    /// It defaults to 1, the start of a fresh journal; a journal continued
+    /// after a restart begins wherever the previous run left off, and passing
+    /// that lets the check apply across the restart too.
+    RecoveryReport read(const std::function<void(const Record&)>& visit,
+                        SeqNum expected_first_sequence = 1);
 
     /// Truncates a damaged final segment to its last complete record, leaving a
     /// journal that reads cleanly.

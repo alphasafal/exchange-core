@@ -131,28 +131,45 @@ TEST_F(EngineTest, RejectsCommandsForAnUnknownInstrument) {
 // --- Sequencing ------------------------------------------------------------
 
 TEST_F(EngineTest, AssignsStrictlyIncreasingSequenceNumbers) {
+    // Two instruments were registered in SetUp, and registering an instrument
+    // is an event in the venue's total order like any other.
+    const SeqNum base = engine.sequence();
+    ASSERT_EQ(base, 2u);
+
     const SeqNum first = engine.submit(order(1, 1, Side::Buy, 100, 10)).sequence;
     const SeqNum second = engine.submit(order(2, 1, Side::Buy, 101, 10)).sequence;
     CancelOrder cancel{OrderId{1}, AccountId{1}, InstrumentId{1}};
     const SeqNum third = engine.cancel(cancel).sequence;
 
-    EXPECT_EQ(first, 1u);
-    EXPECT_EQ(second, 2u);
-    EXPECT_EQ(third, 3u);
-    EXPECT_EQ(engine.sequence(), 3u);
+    EXPECT_EQ(first, base + 1);
+    EXPECT_EQ(second, base + 2);
+    EXPECT_EQ(third, base + 3);
+    EXPECT_EQ(engine.sequence(), base + 3);
 }
 
-TEST_F(EngineTest, ConsumesASequenceNumberForRejectedCommandsToo) {
-    engine.submit(order(1, 1, Side::Buy, 100, 10));
+TEST_F(EngineTest, DoesNotNumberCommandsThatNeverReachTheBook) {
+    const SeqNum accepted = engine.submit(order(1, 1, Side::Buy, 100, 10)).sequence;
 
-    // Skipping rejects would make the numbering depend on decisions taken
-    // during processing -- exactly the dependency that sequencing before
-    // processing exists to remove.
+    // Journal sequence numbers have to be gap-free, so that a gap can only ever
+    // mean data loss. Numbering a command that was turned away before the book
+    // would punch a hole in that numbering for a perfectly healthy reason, and
+    // recovery could no longer tell a rejected command from a lost one.
     const SubmitOutcome rejected = engine.submit(order(2, 99, Side::Buy, 100, 10));
     EXPECT_EQ(rejected.reject, RejectReason::UnknownInstrument);
-    EXPECT_EQ(rejected.sequence, 2u);
+    EXPECT_EQ(rejected.sequence, 0u) << "no position in the stream was consumed";
 
-    EXPECT_EQ(engine.submit(order(3, 1, Side::Buy, 100, 10)).sequence, 3u);
+    EXPECT_EQ(engine.submit(order(3, 1, Side::Buy, 100, 10)).sequence, accepted + 1);
+}
+
+TEST_F(EngineTest, NumbersRejectionsThatComeFromTheBookItself) {
+    const SeqNum accepted = engine.submit(order(1, 1, Side::Buy, 100, 10)).sequence;
+
+    // A duplicate order id is a decision of the matching logic, not a gate in
+    // front of it. It is journaled and replayed like any other command, and
+    // reproduces the same rejection.
+    const SubmitOutcome duplicate = engine.submit(order(1, 1, Side::Buy, 101, 10));
+    EXPECT_EQ(duplicate.reject, RejectReason::DuplicateOrderId);
+    EXPECT_EQ(duplicate.sequence, accepted + 1);
 }
 
 TEST_F(EngineTest, StampsPriorityFromItsOwnSequenceAndClock) {
@@ -161,14 +178,14 @@ TEST_F(EngineTest, StampsPriorityFromItsOwnSequenceAndClock) {
 
     const Order* resting = engine.book(InstrumentId{1})->find(OrderId{1});
     ASSERT_NE(resting, nullptr);
-    EXPECT_EQ(resting->sequence, 1u);
+    EXPECT_EQ(resting->sequence, 3u) << "after the two instrument registrations";
     EXPECT_EQ(resting->accepted_at, 555'000);
 
     clock.advance(1000);
     engine.submit(order(2, 1, Side::Buy, 100, 10));
     const Order* second = engine.book(InstrumentId{1})->find(OrderId{2});
     ASSERT_NE(second, nullptr);
-    EXPECT_EQ(second->sequence, 2u);
+    EXPECT_EQ(second->sequence, 4u);
     EXPECT_EQ(second->accepted_at, 556'000);
 }
 
@@ -211,13 +228,14 @@ TEST_F(EngineTest, CancelsAndAmendsAnAccountsOwnOrder) {
 
 TEST_F(EngineTest, ReportsAcceptanceBeforeTheFillsItCaused) {
     engine.submit(order(1, 1, Side::Sell, 100, 10));
-    engine.submit(order(2, 1, Side::Buy, 100, 10));
+    const SeqNum crossing = engine.submit(order(2, 1, Side::Buy, 100, 10)).sequence;
 
     ASSERT_EQ(listener.events.size(), 3u);
     EXPECT_EQ(listener.events[0].kind, RecordingListener::Event::Kind::Accepted);
     EXPECT_EQ(listener.events[1].kind, RecordingListener::Event::Kind::Accepted);
     EXPECT_EQ(listener.events[2].kind, RecordingListener::Event::Kind::Fills);
-    EXPECT_EQ(listener.events[2].sequence, 2u);
+    EXPECT_EQ(listener.events[2].sequence, crossing)
+        << "fills are attributed to the command that caused them";
     EXPECT_EQ(listener.events[2].fill_count, 1u);
     EXPECT_EQ(listener.fill_quantities, (std::vector<Quantity>{10}));
 }

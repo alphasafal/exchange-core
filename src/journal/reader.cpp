@@ -39,8 +39,20 @@ std::vector<std::filesystem::path> JournalReader::segments() const {
     return paths;
 }
 
-RecoveryReport JournalReader::read(const std::function<void(const Record&)>& visit) {
+RecoveryReport JournalReader::read(const std::function<void(const Record&)>& visit,
+                                   SeqNum expected_first_sequence) {
     RecoveryReport report;
+    SeqNum expected = expected_first_sequence;
+
+    // A path that does not exist is not an empty journal. Reporting "clean, no
+    // records" for a mistyped directory would let an operator conclude a venue
+    // had no state to recover when in fact its journal was never looked at.
+    std::error_code ec;
+    if (!std::filesystem::is_directory(directory_, ec)) {
+        report.outcome = RecoveryOutcome::Unreadable;
+        report.message = "journal directory does not exist: " + directory_.string();
+        return report;
+    }
 
     for (const std::filesystem::path& path : segments()) {
         std::ifstream file(path, std::ios::binary);
@@ -59,6 +71,20 @@ RecoveryReport JournalReader::read(const std::function<void(const Record&)>& vis
             const DecodeResult decoded =
                 decode(std::span<const std::uint8_t>(bytes.data() + offset, bytes.size() - offset));
             if (decoded.status == DecodeStatus::Ok) {
+                if (decoded.record.sequence != expected) {
+                    // Gap-free numbering is what gives this check its meaning:
+                    // the engine numbers journaled commands consecutively, so a
+                    // jump can only be missing records.
+                    report.outcome = RecoveryOutcome::SequenceGap;
+                    report.expected_sequence = expected;
+                    report.damaged_segment = path;
+                    report.good_bytes_in_damaged_segment = offset;
+                    report.message = "expected sequence " + std::to_string(expected) +
+                                     " but found " + std::to_string(decoded.record.sequence) +
+                                     " in " + path.string() + "; records are missing";
+                    return report;
+                }
+                ++expected;
                 visit(decoded.record);
                 ++report.records_recovered;
                 report.last_sequence = decoded.record.sequence;

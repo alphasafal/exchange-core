@@ -236,6 +236,18 @@ TEST(JournalIo, ReportsAnEmptyDirectoryAsClean) {
     EXPECT_EQ(report.last_sequence, 0u);
 }
 
+TEST(JournalIo, ReportsAMissingDirectoryRatherThanCallingItEmpty) {
+    RecoveryReport report;
+    read_all("/tmp/xc-journal-that-does-not-exist-9c1f", report);
+
+    // Reporting "clean, no records" for a mistyped path would let an operator
+    // conclude a venue had no state to recover when its journal was simply
+    // never looked at.
+    EXPECT_EQ(report.outcome, RecoveryOutcome::Unreadable);
+    EXPECT_FALSE(report.usable());
+    EXPECT_NE(report.message.find("does not exist"), std::string::npos);
+}
+
 TEST(JournalIo, CountsSyncsUnderEachDurabilityPolicy) {
     const auto syncs_for = [](Durability durability, Nanos interval) {
         TempJournal temp;

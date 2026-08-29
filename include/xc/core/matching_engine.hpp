@@ -10,6 +10,7 @@
 #include "xc/core/commands.hpp"
 #include "xc/core/engine_listener.hpp"
 #include "xc/core/order_book.hpp"
+#include "xc/journal/writer.hpp"
 #include "xc/risk/kill_switch.hpp"
 #include "xc/risk/risk_engine.hpp"
 
@@ -34,16 +35,26 @@ using ReplaceOutcome = Sequenced<ReplaceResult>;
 /// all. Throughput scales by partitioning instruments across engines, not by
 /// threading one book.
 ///
-/// **Sequence before process.** Every command is assigned its sequence number
-/// on arrival, before any matching happens, and that number is what gets
-/// journaled. Gateway threads may deliver commands in any order the network
-/// hands them over; once the engine has stamped them, the order is fixed and
-/// reproducible. Replaying the journal therefore reconstructs the same state
-/// even though the original arrival order was never deterministic.
+/// **Sequence before state change.** A command is assigned its sequence number
+/// once it has passed every gate that could turn it away without touching the
+/// book, and immediately before it is journaled -- so the sequence number, the
+/// journal record and the state change are the same event. Gateway threads may
+/// deliver commands in any order the network hands them over; once the engine
+/// has numbered one, the order is fixed and reproducible, and replaying the
+/// journal reconstructs the same state even though arrival order never was
+/// deterministic.
 ///
-/// Rejected commands consume a sequence number too. Skipping them would make
-/// the journal's numbering depend on decisions taken during processing, which
-/// is the dependency this design exists to remove.
+/// The consequence worth stating explicitly is that **journal sequence numbers
+/// are gap-free**. A gap therefore means data loss and nothing else. Numbering
+/// commands that are refused before the book -- an unknown instrument, a halt,
+/// a risk limit -- would punch holes in that numbering for entirely healthy
+/// reasons, and recovery would have no way to tell a rejected command from a
+/// lost one.
+///
+/// Rejections that come from the book itself, such as a duplicate order id or
+/// an unfillable fill-or-kill, are numbered and journaled like any other
+/// command: they are decisions of the matching logic, and replaying them
+/// reproduces the same decision.
 class MatchingEngine {
   public:
     /// The clock is borrowed, not owned, and must outlive the engine. Replay
@@ -80,7 +91,36 @@ class MatchingEngine {
     /// Registers a listener. Not owned; must outlive the engine.
     void add_listener(EngineListener* listener);
 
+    /// Installs the write-ahead journal. Borrowed, not owned.
+    ///
+    /// A command is journaled once it has been admitted by risk and before the
+    /// book is touched, which is what makes this write-ahead with respect to
+    /// the state it protects. Commands refused before that point changed
+    /// nothing and are not journaled, so a replay needs the instrument set --
+    /// which the journal carries -- but not a copy of the risk configuration.
+    ///
+    /// If the journal cannot record a command the engine refuses it and halts
+    /// the venue. Matching something that could never be replayed is the exact
+    /// state a journal exists to prevent, so failing loudly is the only safe
+    /// response.
+    void set_journal(journal::JournalWriter* journal) noexcept { journal_ = journal; }
+
     const OrderBook* book(InstrumentId id) const;
+
+    /// Every registered instrument, in ascending id order.
+    ///
+    /// Ordered explicitly rather than exposing the hash map's iteration order,
+    /// which is unspecified and can differ between runs of the same binary --
+    /// enough on its own to make a state digest disagree with itself.
+    const std::vector<InstrumentId>& instruments() const noexcept { return instrument_order_; }
+
+    /// Forces the sequence number the next command will receive.
+    ///
+    /// Exists for replay and nothing else. Queue priority is derived from the
+    /// sequence number, so a replayed command has to be given the number the
+    /// original run gave it or the reconstructed book would be correctly
+    /// matched and still differently ordered.
+    void restore_sequence(SeqNum last_assigned) noexcept { sequence_ = last_assigned; }
 
     /// Sequence number of the most recently accepted command. Zero before any
     /// command has been processed.
@@ -98,11 +138,20 @@ class MatchingEngine {
     /// order counts from both.
     void settle_risk(InstrumentId instrument);
 
+    /// Journals a command that has been admitted and is about to be applied.
+    /// Returns false when the journal failed, in which case the venue is halted.
+    bool journal_command(const journal::Record& record, Nanos now);
+
     Clock& clock_;
+    journal::JournalWriter* journal_ = nullptr;
     risk::RiskEngine* risk_ = nullptr;
     risk::KillSwitch* kill_ = nullptr;
     std::unordered_map<InstrumentId, std::unique_ptr<OrderBook>> books_;
     std::unordered_map<std::string, InstrumentId> symbols_;
+    std::vector<InstrumentId> instrument_order_;
+
+    /// Reused so journaling a command does not allocate.
+    journal::Record scratch_record_;
     std::vector<EngineListener*> listeners_;
 
     /// Reused across commands so that matching never allocates to report its
