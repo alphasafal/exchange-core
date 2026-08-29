@@ -151,6 +151,28 @@ class OrderBook {
     /// reference so absence is representable; invalidated by any mutation.
     const Order* find(OrderId id) const;
 
+    /// Visits every resting order in matching order: best price first, and
+    /// within a price, the order that would fill first. Bids are visited before
+    /// asks.
+    ///
+    /// Defined in the header because it is a template, and exposed because
+    /// several things outside the book need its exact contents in exactly this
+    /// order -- the differential tests, the state hash that proves replay is
+    /// deterministic, and the recovery snapshot.
+    template<typename Visitor>
+    void for_each_resting_order(Visitor&& visit) const {
+        for (const auto& [price, level] : bids_) {
+            for (OrderHandle h = level.front(); h != kNullHandle; h = pool_.node(h).next) {
+                visit(pool_[h]);
+            }
+        }
+        for (const auto& [price, level] : asks_) {
+            for (OrderHandle h = level.front(); h != kNullHandle; h = pool_.node(h).next) {
+                visit(pool_[h]);
+            }
+        }
+    }
+
     std::size_t resting_order_count() const noexcept { return index_.size(); }
     std::size_t bid_level_count() const noexcept { return bids_.size(); }
     std::size_t ask_level_count() const noexcept { return asks_.size(); }

@@ -26,6 +26,7 @@ foreach(gtest_target IN ITEMS gtest gtest_main)
 endforeach()
 
 add_executable(xc_tests
+    model/reference_book.cpp
     test_build_info.cpp
     test_types.cpp
     test_order_storage.cpp
