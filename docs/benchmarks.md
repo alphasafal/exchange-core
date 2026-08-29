@@ -133,11 +133,16 @@ measurement is what the guarantee actually costs.
 
 ## What has not been measured
 
-**Hardware performance counters** — cache misses, branch misses, IPC. These
-need `perf` on bare-metal Linux or Instruments on macOS. CI runners virtualise
-the performance monitoring unit and do not report trustworthy counters, so
-nothing of the kind is published here. `scripts/perf_stat.sh` ships the Linux
-recipe for anyone with a suitable machine.
+**Hardware performance counters** — cache misses, branch misses, IPC. Two
+reasons, both concrete rather than hedged. On macOS these need Instruments,
+which requires full Xcode; this machine has only the Command Line Tools, so
+`xctrace` refuses to run. On Linux they need `perf` against a real performance
+monitoring unit, and CI runners virtualise the PMU, so a number collected there
+would describe the hypervisor as much as the code.
+
+No counter is published that was not measured. `scripts/perf_stat.sh` ships the
+Linux recipe and the macOS `xctrace` invocation for anyone with a machine that
+can produce them.
 
 **End-to-end wire latency** — order in over TCP to execution out on the UDP
 feed, measured open-loop against intended send times. The transport is built and
