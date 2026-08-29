@@ -16,6 +16,7 @@ cd "$(dirname "$0")/.."
 ORDERS=1000000
 WARMUP=200000
 RUN_JOURNAL=0
+RUN_WIRE=0
 OUT=""
 
 while [[ $# -gt 0 ]]; do
@@ -23,6 +24,7 @@ while [[ $# -gt 0 ]]; do
         --orders) ORDERS="$2"; shift 2 ;;
         --warmup) WARMUP="$2"; shift 2 ;;
         --journal) RUN_JOURNAL=1; shift ;;
+        --wire) RUN_WIRE=1; shift ;;
         --out) OUT="$2"; shift 2 ;;
         --help)
             sed -n '2,12p' "$0"
@@ -134,6 +136,25 @@ fi
             echo '```'
             echo
             rm -rf "${journal_dir}"
+        done
+    fi
+    if [[ "${RUN_WIRE}" -eq 1 ]]; then
+        echo
+        echo "## End-to-end over the wire"
+        echo
+        echo "Open-loop: every order's send time is fixed before the run starts and"
+        echo "latency is measured from it, so an order sent late is charged for being"
+        echo "late. A send-then-wait harness stalls whenever the venue does and never"
+        echo "samples the stall."
+        echo
+        for rate in 20000 100000 500000; do
+            echo "### target rate: ${rate} orders/s"
+            echo
+            echo '```'
+            "${BUILD_DIR}/bench/bench_wire" --orders 60000 --rate "${rate}" --warmup 10000 |
+                sed -n '/^load/,$p'
+            echo '```'
+            echo
         done
     fi
 } | emit

@@ -131,6 +131,71 @@ guarantee the data survives a power cut, so using it here would have made the
 durability claim false while making this number look far better. The
 measurement is what the guarantee actually costs.
 
+## End-to-end over the wire
+
+An order in over TCP to its acknowledgement back out, with the venue on its own
+thread and the load generator on another, so the generator is never blocked by
+the system it measures.
+
+**These are loopback numbers.** Loopback elides the network interface, the
+cable, the switch and the kernel bypass stack that dominate real trading
+latency. They describe this software's path through the kernel's TCP stack on
+one machine, and nothing else. They are not comparable to any venue's published
+figures.
+
+| Target rate | Achieved | p50 | p90 | p99 | p99.9 |
+|---|---|---|---|---|---|
+| 20,000/s | 20,000/s | 19.9 µs | 25.3 µs | 84.0 µs | 4.52 ms |
+| 100,000/s | 100,000/s | 16.1 µs | 50.6 µs | 721 µs | 1.88 ms |
+| 500,000/s | 164,000/s | 245 ms | 407 ms | 445 ms | 449 ms |
+
+All measured from *intended* send time — see below. The round trip is ~16-20 µs
+at the median, of which matching is about 75 ns. Essentially all of it is the
+kernel's TCP path and thread scheduling, not the engine.
+
+The last row is the system past its capacity: the generator asked for 500,000
+per second, the venue sustained about 164,000, and latency became queueing
+delay measured in hundreds of milliseconds. That is the correct thing for an
+overloaded system to report, and it is only visible because the generator kept
+sending.
+
+### Why the load is generated open-loop
+
+The obvious harness sends an order, waits for the reply, times it, and repeats.
+That measures service time rather than latency, and it fails in a specific way:
+when the venue stalls, the harness stalls with it and simply sends fewer
+orders. The stall is never sampled, because no request was in flight to observe
+it. This is *coordinated omission*, and its effect is to make a system look
+better the worse it behaves.
+
+Here every order's send time is fixed before the run starts, and latency is
+measured from that intended time. An order sent late is charged for being late.
+The benchmark reports both, so the difference is visible rather than argued
+about:
+
+| Target rate | p99.9 from actual send | p99.9 from intended send | Understated by |
+|---|---|---|---|
+| 20,000/s | 873 µs | 4.52 ms | **5.2x** |
+| 100,000/s | 1.80 ms | 1.88 ms | 1.0x |
+| 500,000/s | 326 ms | 449 ms | 1.4x |
+
+The 20,000 per second row is the one worth looking at, and the result is not
+what intuition suggests. At *low* load the closed-loop measurement is wrong by
+the widest margin: the offered load is far inside capacity, so a scheduler
+stall of a few milliseconds is invisible to a harness that was waiting anyway,
+and its p99.9 comes out five times better than reality. At high load both
+measurements see the queue and converge.
+
+A latency figure quoted without saying how the load was generated is not a
+measurement of the system. It is partly a measurement of the harness.
+
+### Variability
+
+These are single runs on a laptop running a desktop. The medians are stable
+across runs to within a microsecond or two; the tails beyond p99 move
+substantially, because they are scheduler behaviour rather than engine
+behaviour. Do not read a 10% difference in a tail figure here as meaningful.
+
 ## What has not been measured
 
 **Hardware performance counters** — cache misses, branch misses, IPC. Two
@@ -144,9 +209,9 @@ No counter is published that was not measured. `scripts/perf_stat.sh` ships the
 Linux recipe and the macOS `xctrace` invocation for anyone with a machine that
 can produce them.
 
-**End-to-end wire latency** — order in over TCP to execution out on the UDP
-feed, measured open-loop against intended send times. The transport is built and
-tested; the measurement is not yet done, and no figure is given for it.
+**Latency of the UDP market data path** — the round trip measured above ends at
+the session acknowledgement, not at the trade appearing on the feed. The feed is
+built and tested but its own latency is not separately measured.
 
 **Sustained multi-hour behaviour.** Every run here is seconds long. Nothing is
 claimed about memory or latency drift over a trading day.
