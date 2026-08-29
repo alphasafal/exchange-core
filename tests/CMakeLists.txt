@@ -45,6 +45,7 @@ add_executable(xc_tests
     test_journal_record.cpp
     test_journal_io.cpp
     test_replay.cpp
+    test_protocol.cpp
 )
 target_link_libraries(xc_tests PRIVATE xc::core GTest::gtest_main)
 target_include_directories(xc_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

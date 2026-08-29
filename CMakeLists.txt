@@ -87,6 +87,7 @@ add_library(xc_core STATIC
     src/journal/record.cpp
     src/journal/replayer.cpp
     src/journal/writer.cpp
+    src/protocol/messages.cpp
     src/risk/kill_switch.cpp
     src/risk/risk_engine.cpp
     src/util/build_info.cpp
