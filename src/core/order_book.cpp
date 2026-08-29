@@ -31,13 +31,51 @@ RejectReason OrderBook::validate(const Order& order) const {
 }
 
 template<typename Levels, typename Crosses>
-Quantity OrderBook::fillable(const Levels& levels, Crosses crosses, Quantity needed) const {
+Quantity OrderBook::fillable(const Levels& levels, Crosses crosses, Quantity needed,
+                             AccountId account) const {
+    const SelfTradePolicy policy = instrument_.self_trade_policy;
+    const bool prevention_active = policy != SelfTradePolicy::Allow && account.valid();
+
+    // Self-trade prevention makes the aggressor's own resting size unavailable
+    // to it, so counting level totals would let a fill-or-kill pass its
+    // fillability check against liquidity it can never trade with and then fill
+    // short -- reintroducing, through the back door, exactly the inconsistency
+    // the two-phase design exists to prevent. Under the cancel-incoming
+    // policies the aggressor also stops dead at its first own order, so nothing
+    // beyond that point counts either.
+    //
+    // Handling that needs a walk over individual orders rather than a read of
+    // the level total. The cost is paid only when prevention is active and only
+    // by fill-or-kill orders, which are a small fraction of real flow; every
+    // other path still reads one number per level.
+    const bool stops_at_own_order =
+        policy == SelfTradePolicy::CancelIncoming || policy == SelfTradePolicy::CancelBoth;
+
     Quantity available = 0;
     for (const auto& [price, level] : levels) {
         if (!crosses(price)) {
             break;
         }
-        available += level.total_quantity();
+
+        if (!prevention_active) {
+            available += level.total_quantity();
+        } else {
+            for (OrderHandle handle = level.front(); handle != kNullHandle;
+                 handle = pool_.node(handle).next) {
+                const Order& resting = pool_[handle];
+                if (resting.account == account) {
+                    if (stops_at_own_order) {
+                        return available;
+                    }
+                    continue;
+                }
+                available += resting.remaining;
+                if (available >= needed) {
+                    return available;
+                }
+            }
+        }
+
         if (available >= needed) {
             // Counting past what was asked for wastes a walk over levels that
             // cannot change the answer.
@@ -47,8 +85,21 @@ Quantity OrderBook::fillable(const Levels& levels, Crosses crosses, Quantity nee
     return available;
 }
 
+void OrderBook::drop_resting(PriceLevel& level, OrderHandle handle) {
+    // Read the id before releasing: the reference is dead the moment the node
+    // goes back on the free list.
+    const OrderId id = pool_[handle].id;
+    level.unlink(pool_, handle);
+    index_.erase(id);
+    pool_.release(handle);
+}
+
 template<typename Levels, typename Crosses>
-void OrderBook::match(Levels& levels, Order& incoming, Crosses crosses, std::vector<Fill>& fills) {
+void OrderBook::match(Levels& levels, Order& incoming, Crosses crosses, std::vector<Fill>& fills,
+                      Quantity& stp_cancelled) {
+    const SelfTradePolicy policy = instrument_.self_trade_policy;
+    const bool prevention_active = policy != SelfTradePolicy::Allow && incoming.account.valid();
+
     while (incoming.remaining > 0 && !levels.empty()) {
         auto level_it = levels.begin();
         const Price level_price = level_it->first;
@@ -60,6 +111,49 @@ void OrderBook::match(Levels& levels, Order& incoming, Crosses crosses, std::vec
         while (incoming.remaining > 0 && !level.empty()) {
             const OrderHandle resting_handle = level.front();
             Order& resting = pool_[resting_handle];
+
+            if (prevention_active && resting.account == incoming.account) {
+                switch (policy) {
+                    case SelfTradePolicy::CancelIncoming:
+                        // The aggressor gives way and stops here. Everything
+                        // deeper in the book stays untouched, which is the
+                        // point: the firm keeps the queue position it paid for.
+                        stp_cancelled += incoming.remaining;
+                        incoming.remaining = 0;
+                        break;
+
+                    case SelfTradePolicy::CancelResting:
+                        // The resting order gives way and the aggressor carries
+                        // on into whatever was behind it.
+                        drop_resting(level, resting_handle);
+                        continue;
+
+                    case SelfTradePolicy::CancelBoth:
+                        stp_cancelled += incoming.remaining;
+                        incoming.remaining = 0;
+                        drop_resting(level, resting_handle);
+                        break;
+
+                    case SelfTradePolicy::DecrementBoth: {
+                        // Both sides shrink by the overlap and no trade prints.
+                        // Nothing changed hands, so this must never reach the
+                        // tape or a position calculation.
+                        const Quantity overlap = std::min(incoming.remaining, resting.remaining);
+                        incoming.remaining -= overlap;
+                        resting.remaining -= overlap;
+                        level.reduce(overlap);
+                        stp_cancelled += overlap;
+                        if (resting.remaining == 0) {
+                            drop_resting(level, resting_handle);
+                        }
+                        continue;
+                    }
+
+                    case SelfTradePolicy::Allow:
+                        break;  // Unreachable: prevention_active excludes it.
+                }
+                break;
+            }
 
             const Quantity quantity = std::min(incoming.remaining, resting.remaining);
             incoming.remaining -= quantity;
@@ -82,12 +176,7 @@ void OrderBook::match(Levels& levels, Order& incoming, Crosses crosses, std::vec
             });
 
             if (resting_filled) {
-                // Read the id before releasing: the reference is dead the
-                // moment the node goes back on the free list.
-                const OrderId resting_id = resting.id;
-                level.unlink(pool_, resting_handle);
-                index_.erase(resting_id);
-                pool_.release(resting_handle);
+                drop_resting(level, resting_handle);
             }
         }
 
@@ -95,6 +184,21 @@ void OrderBook::match(Levels& levels, Order& incoming, Crosses crosses, std::vec
             levels.erase(level_it);
         }
     }
+}
+
+bool OrderBook::would_cross(const Order& order) const {
+    // A market order takes liquidity by definition, so it always counts as
+    // crossing -- combining it with post-only is a contradiction the caller is
+    // told about rather than one that is silently resolved.
+    if (order.type == OrderType::Market) {
+        return true;
+    }
+    if (order.is_buy()) {
+        const std::optional<Price> ask = best_ask();
+        return ask.has_value() && order.price >= *ask;
+    }
+    const std::optional<Price> bid = best_bid();
+    return bid.has_value() && order.price <= *bid;
 }
 
 void OrderBook::rest(Order& order) {
@@ -115,6 +219,15 @@ SubmitResult OrderBook::submit(Order order, std::vector<Fill>& fills) {
     }
 
     order.remaining = order.quantity;
+
+    // Post-only is checked before matching rather than after. A market maker
+    // sends these because paying the spread would invert its economics, so the
+    // correct response to "this would cross" is to refuse the order, not to
+    // trade it and report the fact afterwards.
+    if (order.post_only && would_cross(order)) {
+        result.reject = RejectReason::PostOnlyWouldCross;
+        return result;
+    }
 
     // A market order crosses at any price; a limit order crosses only up to
     // its own. Expressing that as a predicate keeps one matching loop for both
@@ -140,8 +253,8 @@ SubmitResult OrderBook::submit(Order order, std::vector<Fill>& fills) {
     // extra walk over the crossing levels and makes the failure path a genuine
     // no-op.
     if (order.tif == TimeInForce::FillOrKill) {
-        const Quantity available = buying ? fillable(asks_, crosses, order.quantity)
-                                          : fillable(bids_, crosses, order.quantity);
+        const Quantity available = buying ? fillable(asks_, crosses, order.quantity, order.account)
+                                          : fillable(bids_, crosses, order.quantity, order.account);
         if (available < order.quantity) {
             result.reject = RejectReason::FillOrKillUnfillable;
             return result;
@@ -149,11 +262,14 @@ SubmitResult OrderBook::submit(Order order, std::vector<Fill>& fills) {
     }
 
     if (buying) {
-        match(asks_, order, crosses, fills);
+        match(asks_, order, crosses, fills, result.stp_cancelled);
     } else {
-        match(bids_, order, crosses, fills);
+        match(bids_, order, crosses, fills, result.stp_cancelled);
     }
-    result.filled = order.quantity - order.remaining;
+    // Quantity removed by self-trade prevention never printed a trade, so it
+    // has to come out of the filled figure or a client reconciling fills
+    // against its own position would come up short.
+    result.filled = order.quantity - order.remaining - result.stp_cancelled;
 
     if (order.remaining == 0) {
         return result;

@@ -21,6 +21,13 @@ struct SubmitResult {
     /// Quantity that traded on arrival.
     Quantity filled = 0;
 
+    /// Quantity of the incoming order removed by self-trade prevention without
+    /// printing a trade. Reported separately because a client that sees only a
+    /// short fill cannot otherwise distinguish "the book ran out of liquidity"
+    /// from "my own resting order was in the way", and those call for
+    /// completely different responses.
+    Quantity stp_cancelled = 0;
+
     /// True when a remainder was left resting on the book.
     bool rested = false;
 
@@ -102,13 +109,22 @@ class OrderBook {
     using AskLevels = std::map<Price, PriceLevel, std::less<Price>>;
 
     template<typename Levels, typename Crosses>
-    void match(Levels& levels, Order& incoming, Crosses crosses, std::vector<Fill>& fills);
+    void match(Levels& levels, Order& incoming, Crosses crosses, std::vector<Fill>& fills,
+               Quantity& stp_cancelled);
 
-    /// Quantity available to an aggressor at prices it is willing to trade at,
-    /// counting no further than `needed`. Used to decide a fill-or-kill before
-    /// anything has been mutated.
+    /// Quantity an aggressor from `account` could actually trade at prices it
+    /// is willing to pay, counting no further than `needed`. Used to decide a
+    /// fill-or-kill before anything has been mutated.
     template<typename Levels, typename Crosses>
-    Quantity fillable(const Levels& levels, Crosses crosses, Quantity needed) const;
+    Quantity fillable(const Levels& levels, Crosses crosses, Quantity needed,
+                      AccountId account) const;
+
+    /// Unlinks a resting order from `level`, drops its index entry and returns
+    /// its slab node. Shared by matching and self-trade prevention.
+    void drop_resting(PriceLevel& level, OrderHandle handle);
+
+    /// True when this order would take liquidity on arrival.
+    bool would_cross(const Order& order) const;
 
     void rest(Order& order);
     RejectReason validate(const Order& order) const;
