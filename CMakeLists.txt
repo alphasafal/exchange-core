@@ -78,6 +78,8 @@ endif()
 # Core library
 # ---------------------------------------------------------------------------
 add_library(xc_core STATIC
+    src/core/order_pool.cpp
+    src/core/price_level.cpp
     src/util/build_info.cpp
 )
 target_include_directories(xc_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
