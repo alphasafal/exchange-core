@@ -29,8 +29,10 @@ add_executable(xc_tests
     test_build_info.cpp
     test_types.cpp
     test_order_storage.cpp
+    test_order_book.cpp
 )
 target_link_libraries(xc_tests PRIVATE xc::core GTest::gtest_main)
+target_include_directories(xc_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 include(GoogleTest)
 gtest_discover_tests(xc_tests)
