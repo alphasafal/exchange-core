@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <limits>
 
 namespace xc::risk {
 
@@ -81,13 +82,34 @@ RejectReason RiskEngine::check_collar(const NewOrder& command) const {
 
     const Price deviation =
         command.price > reference ? command.price - reference : reference - command.price;
-    // Computed in 128 bits: deviation * 10000 overflows a signed 64-bit value
-    // at prices well inside the representable range, and an overflow here would
-    // wrap a wild price into a small deviation and admit it.
-    const auto scaled = static_cast<__int128>(deviation) * 10'000;
-    const auto allowed =
-        static_cast<__int128>(reference) * static_cast<__int128>(it->second.controls.collar_bps);
-    return scaled > allowed ? RejectReason::PriceCollar : RejectReason::None;
+
+    // The comparison is deviation * 10000 > reference * collar_bps, performed
+    // without ever forming a product that could overflow.
+    //
+    // An earlier version used __int128. Clang accepts it; GCC rejects it under
+    // -Wpedantic as a non-standard extension, which the CI matrix caught. Both
+    // operands are bounded instead, and where a product would overflow the
+    // answer is already settled by how extreme the inputs are.
+    constexpr std::uint64_t kMax = std::numeric_limits<std::uint64_t>::max();
+    constexpr std::uint64_t kBasisPoints = 10'000;
+
+    const auto scaled_deviation = static_cast<std::uint64_t>(deviation);
+    const auto scaled_reference = static_cast<std::uint64_t>(reference);
+    const std::uint64_t collar = it->second.controls.collar_bps;
+
+    if (scaled_deviation > kMax / kBasisPoints) {
+        // Further from the reference than any configurable band could reach.
+        // Rejecting is both correct and the conservative direction.
+        return RejectReason::PriceCollar;
+    }
+    if (scaled_reference > kMax / collar) {
+        // The permitted band is wider than the representable price range, so
+        // nothing can fall outside it.
+        return RejectReason::None;
+    }
+
+    return scaled_deviation * kBasisPoints > scaled_reference * collar ? RejectReason::PriceCollar
+                                                                       : RejectReason::None;
 }
 
 RejectReason RiskEngine::check(const NewOrder& command, const Instrument& instrument, Nanos now) {
