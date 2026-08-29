@@ -82,9 +82,11 @@ add_library(xc_core STATIC
     src/core/order_book.cpp
     src/core/order_pool.cpp
     src/core/price_level.cpp
+    src/journal/record.cpp
     src/risk/kill_switch.cpp
     src/risk/risk_engine.cpp
     src/util/build_info.cpp
+    src/util/crc32c.cpp
 )
 target_include_directories(xc_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(xc_core PUBLIC xc_flags)
