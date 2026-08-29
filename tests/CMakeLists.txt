@@ -36,6 +36,7 @@ add_executable(xc_tests
     test_depth.cpp
     test_differential.cpp
     test_invariants.cpp
+    test_matching_engine.cpp
 )
 target_link_libraries(xc_tests PRIVATE xc::core GTest::gtest_main)
 target_include_directories(xc_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

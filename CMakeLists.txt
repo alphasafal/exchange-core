@@ -78,6 +78,7 @@ endif()
 # Core library
 # ---------------------------------------------------------------------------
 add_library(xc_core STATIC
+    src/core/matching_engine.cpp
     src/core/order_book.cpp
     src/core/order_pool.cpp
     src/core/price_level.cpp
