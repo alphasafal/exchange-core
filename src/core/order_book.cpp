@@ -5,10 +5,33 @@
 #include <utility>
 
 namespace xc {
+namespace {
+
+/// Price levels a book can hold before its node pool has to grow.
+///
+/// Generous on purpose: a level costs tens of bytes, and the cost of being
+/// wrong is an allocation on the matching path.
+constexpr std::size_t kReservedLevelNodes = 4096;
+
+}  // namespace
 
 OrderBook::OrderBook(Instrument instrument, std::size_t initial_capacity)
-    : instrument_(std::move(instrument)), pool_(initial_capacity) {
-    index_.reserve(initial_capacity);
+    : instrument_(std::move(instrument)),
+      pool_(initial_capacity),
+      bids_(std::greater<Price>{}, LevelAllocator{&level_nodes_}),
+      asks_(std::less<Price>{}, LevelAllocator{&level_nodes_}),
+      // Sized so that a book holding up to its expected order count never
+      // rehashes, and therefore never allocates on the matching path.
+      index_(initial_capacity * 2) {
+    // The map's node type is internal, so its size is discovered by inserting
+    // one and removing it again. Reserving afterwards means the first genuine
+    // level creation draws from the pool rather than from the allocator.
+    bids_.emplace(Price{1}, PriceLevel{});
+    const std::size_t node_size = level_nodes_.block_size();
+    bids_.clear();
+    if (node_size > 0) {
+        level_nodes_.reserve(node_size, kReservedLevelNodes);
+    }
 }
 
 RejectReason OrderBook::validate(const Order& order) const {
@@ -256,7 +279,7 @@ bool OrderBook::would_cross(const Order& order) const {
 
 void OrderBook::rest(Order& order) {
     const OrderHandle handle = pool_.acquire(order);
-    index_.emplace(order.id, handle);
+    index_.insert(order.id, handle);
     if (order.is_buy()) {
         bids_[order.price].push_back(pool_, handle);
     } else {
@@ -360,13 +383,13 @@ SubmitResult OrderBook::insert(Order order, std::vector<Fill>& fills,
 CancelResult OrderBook::cancel(OrderId id) {
     CancelResult result;
 
-    const auto it = index_.find(id);
-    if (it == index_.end()) {
+    const OrderHandle* found = index_.find(id);
+    if (found == nullptr) {
         result.reject = RejectReason::UnknownOrder;
         return result;
     }
 
-    const OrderHandle handle = it->second;
+    const OrderHandle handle = *found;
     result.order = pool_[handle];
 
     // Unlinking needs the level the order rests on, which is fully determined
@@ -387,7 +410,7 @@ CancelResult OrderBook::cancel(OrderId id) {
         }
     }
 
-    index_.erase(it);
+    index_.erase(id);
     pool_.release(handle);
     return result;
 }
@@ -397,13 +420,13 @@ ReplaceResult OrderBook::replace(OrderId id, Price new_price, Quantity new_quant
                                  std::vector<Withdrawal>* withdrawals) {
     ReplaceResult result;
 
-    const auto it = index_.find(id);
-    if (it == index_.end()) {
+    const OrderHandle* found = index_.find(id);
+    if (found == nullptr) {
         result.reject = RejectReason::UnknownOrder;
         return result;
     }
 
-    const OrderHandle handle = it->second;
+    const OrderHandle handle = *found;
     const Order previous = pool_[handle];
     result.previous = previous;
 
@@ -537,8 +560,8 @@ Quantity OrderBook::quantity_at(Side side, Price price) const {
 }
 
 const Order* OrderBook::find(OrderId id) const {
-    const auto it = index_.find(id);
-    return it == index_.end() ? nullptr : &pool_[it->second];
+    const OrderHandle* handle = index_.find(id);
+    return handle == nullptr ? nullptr : &pool_[*handle];
 }
 
 Quantity OrderBook::total_quantity(Side side) const {

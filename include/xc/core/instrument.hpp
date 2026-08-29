@@ -33,6 +33,16 @@ struct Instrument {
 
     SelfTradePolicy self_trade_policy = SelfTradePolicy::CancelIncoming;
 
+    /// How many resting orders this instrument's book is sized for.
+    ///
+    /// Not a limit: the book grows past it rather than refusing orders, because
+    /// rejecting a client over an internal sizing choice would be a worse
+    /// failure than one reallocation. But growth is the only thing that
+    /// allocates on the matching path, so a venue sets this from the high-water
+    /// mark it has actually measured -- OrderPool reports both that and the
+    /// number of times it had to grow.
+    std::size_t expected_resting_orders = 4096;
+
     /// True when `price` sits on this instrument's tick grid and is positive.
     /// Prices off the grid are rejected rather than rounded: silently moving a
     /// customer's price is a worse failure than refusing it.

@@ -96,6 +96,7 @@ add_library(xc_core STATIC
     src/venue.cpp
     src/util/build_info.cpp
     src/util/crc32c.cpp
+    src/util/histogram.cpp
 )
 target_include_directories(xc_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(xc_core PUBLIC xc_flags)
@@ -110,6 +111,19 @@ target_compile_definitions(xc_core PRIVATE
     XC_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
     XC_SANITIZER_NAME="${XC_SANITIZER}"
 )
+
+# Allocation counting lives in its own library, linked only into the test
+# binary.
+#
+# Replacing global operator new is a link-time decision that applies to the
+# whole executable, so linking this in instruments every allocation the test
+# makes -- including ones inside xc_core, which is the point. Keeping it out of
+# xc_core means shipped binaries and the benchmarks carry no instrumentation at
+# all, and cannot be accidentally measured with it enabled.
+add_library(xc_alloc_counter STATIC src/util/allocation_counter.cpp)
+target_include_directories(xc_alloc_counter PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(xc_alloc_counter PUBLIC xc_flags)
+target_compile_definitions(xc_alloc_counter PRIVATE XC_COUNT_ALLOCATIONS)
 
 add_subdirectory(apps)
 

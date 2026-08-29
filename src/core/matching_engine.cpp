@@ -74,7 +74,8 @@ bool MatchingEngine::add_instrument(const Instrument& instrument) {
     }
 
     symbols_.emplace(instrument.symbol, instrument.id);
-    books_.emplace(instrument.id, std::make_unique<OrderBook>(instrument));
+    books_.emplace(instrument.id,
+                   std::make_unique<OrderBook>(instrument, instrument.expected_resting_orders));
 
     instrument_order_.push_back(instrument.id);
     std::sort(instrument_order_.begin(), instrument_order_.end());

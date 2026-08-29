@@ -42,6 +42,9 @@ add_executable(xc_tests
     test_kill_switch.cpp
     test_engine_risk.cpp
     test_byte_codec.cpp
+    test_histogram.cpp
+    test_flat_hash_map.cpp
+    test_allocations.cpp
     test_journal_record.cpp
     test_journal_io.cpp
     test_replay.cpp
@@ -51,7 +54,7 @@ add_executable(xc_tests
     test_udp_feed.cpp
     test_venue_end_to_end.cpp
 )
-target_link_libraries(xc_tests PRIVATE xc::core GTest::gtest_main)
+target_link_libraries(xc_tests PRIVATE xc::core xc_alloc_counter GTest::gtest_main)
 target_include_directories(xc_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 include(GoogleTest)
