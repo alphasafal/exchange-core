@@ -49,6 +49,7 @@ add_executable(xc_tests
     test_event_loop.cpp
     test_tcp_gateway.cpp
     test_udp_feed.cpp
+    test_venue_end_to_end.cpp
 )
 target_link_libraries(xc_tests PRIVATE xc::core GTest::gtest_main)
 target_include_directories(xc_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
