@@ -23,8 +23,89 @@ const AccountLimits* RiskEngine::limits_for(AccountId account) const {
     return state == nullptr ? nullptr : &state->limits;
 }
 
-RejectReason RiskEngine::check(const NewOrder& command, const Instrument& instrument) const {
-    const AccountState* state = find(command.account);
+void RiskEngine::configure_instrument(InstrumentId instrument, const InstrumentControls& controls) {
+    instruments_[instrument].controls = controls;
+}
+
+void RiskEngine::set_reference_price(InstrumentId instrument, Price price) {
+    if (price > 0) {
+        instruments_[instrument].reference_price = price;
+    }
+}
+
+Price RiskEngine::reference_price(InstrumentId instrument) const {
+    const auto it = instruments_.find(instrument);
+    return it == instruments_.end() ? kNoPrice : it->second.reference_price;
+}
+
+bool RiskEngine::consume_rate_budget(AccountState& state, Nanos now) const {
+    const std::uint32_t rate = state.limits.max_messages_per_second;
+    if (rate == 0) {
+        return true;
+    }
+
+    // A generic cell rate algorithm rather than a counter over a fixed window.
+    //
+    // Fixed windows let an account send its whole allowance at the end of one
+    // window and again at the start of the next, admitting twice the configured
+    // rate across the boundary. This tracks a single "theoretical arrival time"
+    // instead: each message pushes it forward by one emission interval, and a
+    // message is admitted only if it arrives no earlier than that time less the
+    // burst tolerance. The result has no window boundary to exploit, needs one
+    // integer of state per account, and never drifts, because nothing is ever
+    // divided into a floating point rate.
+    const Nanos interval = static_cast<Nanos>(1'000'000'000ULL / rate);
+    const std::uint32_t burst = state.limits.message_burst == 0 ? 1 : state.limits.message_burst;
+    const Nanos tolerance = static_cast<Nanos>(burst - 1) * interval;
+
+    if (now < state.theoretical_arrival - tolerance) {
+        return false;
+    }
+    state.theoretical_arrival = std::max(now, state.theoretical_arrival) + interval;
+    return true;
+}
+
+RejectReason RiskEngine::check_collar(const NewOrder& command) const {
+    const auto it = instruments_.find(command.instrument);
+    if (it == instruments_.end() || it->second.controls.collar_bps == 0) {
+        return RejectReason::None;
+    }
+    const Price reference = it->second.reference_price;
+    // With no reference price there is nothing honest to measure against. A
+    // venue that has not traded yet cannot tell a fat finger from price
+    // discovery, and guessing would reject the first legitimate order of the
+    // session.
+    if (reference <= 0 || command.type != OrderType::Limit || command.price <= 0) {
+        return RejectReason::None;
+    }
+
+    const Price deviation =
+        command.price > reference ? command.price - reference : reference - command.price;
+    // Computed in 128 bits: deviation * 10000 overflows a signed 64-bit value
+    // at prices well inside the representable range, and an overflow here would
+    // wrap a wild price into a small deviation and admit it.
+    const auto scaled = static_cast<__int128>(deviation) * 10'000;
+    const auto allowed =
+        static_cast<__int128>(reference) * static_cast<__int128>(it->second.controls.collar_bps);
+    return scaled > allowed ? RejectReason::PriceCollar : RejectReason::None;
+}
+
+RejectReason RiskEngine::check(const NewOrder& command, const Instrument& instrument, Nanos now) {
+    AccountState* state = nullptr;
+    if (const auto it = accounts_.find(command.account); it != accounts_.end()) {
+        state = &it->second;
+    }
+
+    // Cheapest first, and rate limiting before everything else so that a flood
+    // is turned away before any more expensive work is done for it.
+    if (state != nullptr && !consume_rate_budget(*state, now)) {
+        return RejectReason::RateLimit;
+    }
+
+    if (const RejectReason collar = check_collar(command); collar != RejectReason::None) {
+        return collar;
+    }
+
     if (state == nullptr) {
         return RejectReason::None;  // Unconfigured accounts are unconstrained.
     }

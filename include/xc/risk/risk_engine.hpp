@@ -37,8 +37,29 @@ class RiskEngine {
 
     const AccountLimits* limits_for(AccountId account) const;
 
-    /// Decides whether an order may reach the book. Mutates nothing.
-    RejectReason check(const NewOrder& command, const Instrument& instrument) const;
+    /// Applies venue-level controls to an instrument.
+    void configure_instrument(InstrumentId instrument, const InstrumentControls& controls);
+
+    /// Updates the price the collar is measured against. The engine calls this
+    /// with the last traded price, which is the most defensible reference a
+    /// venue has: it is a price at which two willing parties actually dealt,
+    /// rather than one either of them merely hoped for.
+    void set_reference_price(InstrumentId instrument, Price price);
+
+    Price reference_price(InstrumentId instrument) const;
+
+    /// Decides whether an order may reach the book.
+    ///
+    /// **Must be called exactly once per inbound message**, because it consumes
+    /// the account's rate-limit budget. That budget is spent whether or not the
+    /// order is admitted: a message that arrives and is rejected still cost the
+    /// matching thread the work of rejecting it, and an account that could send
+    /// unlimited invalid orders would defeat the limit entirely.
+    ///
+    /// Checks run cheapest-first, and the rate limit runs before everything
+    /// else so that a flood is turned away before any of the more expensive
+    /// work happens.
+    RejectReason check(const NewOrder& command, const Instrument& instrument, Nanos now);
 
     /// The order rested. Its unfilled quantity is now a commitment.
     void on_order_rested(const Order& order);
@@ -65,12 +86,27 @@ class RiskEngine {
         AccountLimits limits;
         std::uint32_t open_orders = 0;
         std::unordered_map<InstrumentId, Exposure> exposure;
+
+        /// Theoretical arrival time for the rate limiter. See the note on
+        /// consume_rate_budget().
+        Nanos theoretical_arrival = 0;
     };
+
+    struct InstrumentState {
+        InstrumentControls controls;
+        Price reference_price = kNoPrice;
+    };
+
+    /// True when the account may send one more message now.
+    bool consume_rate_budget(AccountState& state, Nanos now) const;
+
+    RejectReason check_collar(const NewOrder& command) const;
 
     const AccountState* find(AccountId account) const;
     AccountState& state_for(AccountId account);
 
     std::unordered_map<AccountId, AccountState> accounts_;
+    std::unordered_map<InstrumentId, InstrumentState> instruments_;
 };
 
 }  // namespace xc::risk

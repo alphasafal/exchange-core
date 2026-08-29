@@ -106,6 +106,8 @@ enum class RejectReason : std::uint8_t {
     SelfTrade,
     /// Rejected by a pre-trade risk limit.
     RiskLimit,
+    /// Priced too far from the instrument's reference price.
+    PriceCollar,
     /// The account or the venue is halted by the kill switch.
     Halted,
     /// The account exceeded its permitted message rate.
@@ -174,6 +176,8 @@ constexpr std::string_view to_string(RejectReason reason) noexcept {
             return "SelfTrade";
         case RejectReason::RiskLimit:
             return "RiskLimit";
+        case RejectReason::PriceCollar:
+            return "PriceCollar";
         case RejectReason::Halted:
             return "Halted";
         case RejectReason::RateLimit:

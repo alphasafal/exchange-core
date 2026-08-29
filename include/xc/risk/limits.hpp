@@ -43,6 +43,38 @@ struct AccountLimits {
     /// away from being long a thousand; treating it as flat would let it build
     /// an unlimited position one resting order at a time.
     Quantity max_position = std::numeric_limits<Quantity>::max();
+
+    /// Messages the account may send per second, averaged. Zero disables the
+    /// limit.
+    ///
+    /// Rate limiting is the one control that protects the venue rather than the
+    /// account. A client stuck in a quote-cancel loop can saturate the matching
+    /// thread and add latency to everyone else's orders, and it will do so
+    /// without ever breaching a position or notional limit.
+    std::uint32_t max_messages_per_second = 0;
+
+    /// How many messages may arrive back to back before the average rate binds.
+    ///
+    /// Real order flow is bursty: a market maker requoting a whole ladder after
+    /// a price move sends a dozen messages in a microsecond and then nothing
+    /// for a second. A limiter with no burst tolerance rejects exactly the
+    /// legitimate behaviour it should permit.
+    std::uint32_t message_burst = 1;
+};
+
+/// Venue-level controls for one instrument.
+///
+/// These protect the market rather than any single account, which is why they
+/// live here rather than in AccountLimits: a fat-fingered price hurts everyone
+/// resting on the book, not only the account that sent it.
+struct InstrumentControls {
+    /// Furthest an order may be priced from the reference price, in basis
+    /// points. Zero disables the collar.
+    ///
+    /// This is the check that stops a misplaced decimal point from sweeping the
+    /// book. It is deliberately a rejection rather than a price adjustment:
+    /// silently moving a client's price is a worse failure than refusing it.
+    std::uint32_t collar_bps = 0;
 };
 
 }  // namespace xc::risk

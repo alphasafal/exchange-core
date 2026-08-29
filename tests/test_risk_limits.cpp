@@ -40,7 +40,14 @@ class RiskTest : public ::testing::Test {
     RiskEngine risk;
     Instrument instrument = test_instrument();
 
-    RejectReason check(const NewOrder& command) const { return risk.check(command, instrument); }
+    /// Advances the clock on every call so that the rate limiter, which these
+    /// tests do not configure, can never be the reason something is rejected.
+    RejectReason check(const NewOrder& command) {
+        now += 1'000'000;
+        return risk.check(command, instrument, now);
+    }
+
+    Nanos now = 0;
 };
 
 TEST_F(RiskTest, AnUnconfiguredAccountIsUnconstrained) {
