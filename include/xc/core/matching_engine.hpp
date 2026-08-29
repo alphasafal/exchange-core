@@ -10,6 +10,8 @@
 #include "xc/core/commands.hpp"
 #include "xc/core/engine_listener.hpp"
 #include "xc/core/order_book.hpp"
+#include "xc/risk/kill_switch.hpp"
+#include "xc/risk/risk_engine.hpp"
 
 namespace xc {
 
@@ -56,6 +58,21 @@ class MatchingEngine {
     const Instrument* find_instrument(InstrumentId id) const;
     const Instrument* find_instrument(std::string_view symbol) const;
 
+    /// Installs pre-trade risk. Borrowed, not owned. Optional: an engine with
+    /// no risk component matches everything it is given, which is what the
+    /// differential and benchmark harnesses want.
+    ///
+    /// When installed, every new order passes through it *before* reaching the
+    /// book, and everything the book then does -- fills, rests, cancels, and
+    /// quantity withdrawn by self-trade prevention -- is reported back so that
+    /// exposure stays accurate. Missing any one of those paths would leak
+    /// exposure that is never released, and the account would slowly lose the
+    /// ability to trade with nothing in any log to explain it.
+    void set_risk_engine(risk::RiskEngine* risk) noexcept { risk_ = risk; }
+
+    /// Installs the kill switch. Borrowed, not owned.
+    void set_kill_switch(risk::KillSwitch* kill) noexcept { kill_ = kill; }
+
     SubmitOutcome submit(const NewOrder& command);
     CancelOutcome cancel(const CancelOrder& command);
     ReplaceOutcome replace(const ReplaceOrder& command);
@@ -76,7 +93,14 @@ class MatchingEngine {
     SeqNum next_sequence() noexcept { return ++sequence_; }
     OrderBook* book_for(InstrumentId id);
 
+    /// Releases everything the book just did back to the risk component:
+    /// positions from fills, exposure from prevention withdrawals, and open
+    /// order counts from both.
+    void settle_risk(InstrumentId instrument);
+
     Clock& clock_;
+    risk::RiskEngine* risk_ = nullptr;
+    risk::KillSwitch* kill_ = nullptr;
     std::unordered_map<InstrumentId, std::unique_ptr<OrderBook>> books_;
     std::unordered_map<std::string, InstrumentId> symbols_;
     std::vector<EngineListener*> listeners_;
@@ -84,6 +108,10 @@ class MatchingEngine {
     /// Reused across commands so that matching never allocates to report its
     /// results. Cleared, not reconstructed, at the start of each command.
     std::vector<Fill> fills_;
+
+    /// Resting orders that self-trade prevention removed or shrank during the
+    /// current command. Reused like the fill buffer.
+    std::vector<Withdrawal> withdrawals_;
 
     SeqNum sequence_ = 0;
 };

@@ -12,6 +12,7 @@
 #include "xc/core/order.hpp"
 #include "xc/core/order_pool.hpp"
 #include "xc/core/price_level.hpp"
+#include "xc/core/withdrawal.hpp"
 
 namespace xc {
 
@@ -98,7 +99,13 @@ class OrderBook {
     /// Matches `order` against the book and rests any remainder that its time
     /// in force permits. Fills are appended to `fills`; existing contents are
     /// left alone so a caller can accumulate across several commands.
-    SubmitResult submit(Order order, std::vector<Fill>& fills);
+    ///
+    /// `withdrawals`, when supplied, collects resting orders that self-trade
+    /// prevention removed or shrank. Optional rather than required because only
+    /// a caller tracking exposure needs them, and a null pointer costs one
+    /// predictable branch rather than an unused vector on every command.
+    SubmitResult submit(Order order, std::vector<Fill>& fills,
+                        std::vector<Withdrawal>* withdrawals = nullptr);
 
     /// Removes a resting order. Rejects with UnknownOrder if it is not live.
     CancelResult cancel(OrderId id);
@@ -124,7 +131,8 @@ class OrderBook {
     /// have given a fresh order -- priority is defined by that sequence, not by
     /// a timestamp.
     ReplaceResult replace(OrderId id, Price new_price, Quantity new_quantity, SeqNum new_sequence,
-                          Nanos now, std::vector<Fill>& fills);
+                          Nanos now, std::vector<Fill>& fills,
+                          std::vector<Withdrawal>* withdrawals = nullptr);
 
     /// The best bid and offer in one read. Cheaper than calling best_bid() and
     /// best_ask() separately and, more importantly, guaranteed to describe a
@@ -192,7 +200,7 @@ class OrderBook {
 
     template<typename Levels, typename Crosses>
     void match(Levels& levels, Order& incoming, Crosses crosses, std::vector<Fill>& fills,
-               Quantity& stp_cancelled);
+               std::vector<Withdrawal>* withdrawals, Quantity& stp_cancelled);
 
     /// Quantity that would actually *fill* if an aggressor from `account`
     /// submitted `needed` at prices it is willing to pay -- not the quantity
@@ -213,7 +221,8 @@ class OrderBook {
     /// Matches and rests an order whose `remaining` is already set to what it
     /// is asking to trade. Shared by submission and by re-queued amendments,
     /// which arrive having already been partially filled.
-    SubmitResult insert(Order order, std::vector<Fill>& fills);
+    SubmitResult insert(Order order, std::vector<Fill>& fills,
+                        std::vector<Withdrawal>* withdrawals);
 
     void rest(Order& order);
     RejectReason validate(const Order& order) const;

@@ -125,7 +125,19 @@ void OrderBook::drop_resting(PriceLevel& level, OrderHandle handle) {
 
 template<typename Levels, typename Crosses>
 void OrderBook::match(Levels& levels, Order& incoming, Crosses crosses, std::vector<Fill>& fills,
-                      Quantity& stp_cancelled) {
+                      std::vector<Withdrawal>* withdrawals, Quantity& stp_cancelled) {
+    // Records a resting order losing quantity to prevention. There is no fill
+    // and no cancel request to attribute it to, so if it is not recorded here
+    // the resting account's exposure is never released.
+    const auto record_withdrawal = [&](const Order& resting, Quantity quantity,
+                                       bool fully_removed) {
+        if (withdrawals != nullptr) {
+            withdrawals->push_back(Withdrawal{resting.id, resting.account, instrument_.id,
+                                              resting.side, quantity, fully_removed,
+                                              RejectReason::SelfTrade});
+        }
+    };
+
     const SelfTradePolicy policy = instrument_.self_trade_policy;
     const bool prevention_active = policy != SelfTradePolicy::Allow && incoming.account.valid();
 
@@ -154,12 +166,14 @@ void OrderBook::match(Levels& levels, Order& incoming, Crosses crosses, std::vec
                     case SelfTradePolicy::CancelResting:
                         // The resting order gives way and the aggressor carries
                         // on into whatever was behind it.
+                        record_withdrawal(resting, resting.remaining, true);
                         drop_resting(level, resting_handle);
                         continue;
 
                     case SelfTradePolicy::CancelBoth:
                         stp_cancelled += incoming.remaining;
                         incoming.remaining = 0;
+                        record_withdrawal(resting, resting.remaining, true);
                         drop_resting(level, resting_handle);
                         break;
 
@@ -181,6 +195,7 @@ void OrderBook::match(Levels& levels, Order& incoming, Crosses crosses, std::vec
                         resting.quantity -= overlap;
                         level.reduce(overlap);
                         stp_cancelled += overlap;
+                        record_withdrawal(resting, overlap, resting.remaining == 0);
                         if (resting.remaining == 0) {
                             drop_resting(level, resting_handle);
                         }
@@ -249,13 +264,15 @@ void OrderBook::rest(Order& order) {
     }
 }
 
-SubmitResult OrderBook::submit(Order order, std::vector<Fill>& fills) {
+SubmitResult OrderBook::submit(Order order, std::vector<Fill>& fills,
+                               std::vector<Withdrawal>* withdrawals) {
     // A newly submitted order has traded nothing yet.
     order.remaining = order.quantity;
-    return insert(order, fills);
+    return insert(order, fills, withdrawals);
 }
 
-SubmitResult OrderBook::insert(Order order, std::vector<Fill>& fills) {
+SubmitResult OrderBook::insert(Order order, std::vector<Fill>& fills,
+                               std::vector<Withdrawal>* withdrawals) {
     SubmitResult result;
     result.reject = validate(order);
     if (!result.accepted()) {
@@ -311,9 +328,9 @@ SubmitResult OrderBook::insert(Order order, std::vector<Fill>& fills) {
     }
 
     if (buying) {
-        match(asks_, order, crosses, fills, result.stp_cancelled);
+        match(asks_, order, crosses, fills, withdrawals, result.stp_cancelled);
     } else {
-        match(bids_, order, crosses, fills, result.stp_cancelled);
+        match(bids_, order, crosses, fills, withdrawals, result.stp_cancelled);
     }
     // Quantity removed by self-trade prevention never printed a trade, so it
     // has to come out of the filled figure or a client reconciling fills
@@ -376,7 +393,8 @@ CancelResult OrderBook::cancel(OrderId id) {
 }
 
 ReplaceResult OrderBook::replace(OrderId id, Price new_price, Quantity new_quantity,
-                                 SeqNum new_sequence, Nanos now, std::vector<Fill>& fills) {
+                                 SeqNum new_sequence, Nanos now, std::vector<Fill>& fills,
+                                 std::vector<Withdrawal>* withdrawals) {
     ReplaceResult result;
 
     const auto it = index_.find(id);
@@ -447,7 +465,7 @@ ReplaceResult OrderBook::replace(OrderId id, Price new_price, Quantity new_quant
     // insert() rather than submit(): the amendment carries its earlier fills
     // with it, so its remaining quantity must survive rather than being reset
     // to its cumulative total.
-    const SubmitResult resubmitted = insert(amended, fills);
+    const SubmitResult resubmitted = insert(amended, fills, withdrawals);
     result.reject = resubmitted.reject;
     result.filled = resubmitted.filled;
     result.stp_cancelled = resubmitted.stp_cancelled;
