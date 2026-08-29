@@ -194,9 +194,11 @@ class OrderBook {
     void match(Levels& levels, Order& incoming, Crosses crosses, std::vector<Fill>& fills,
                Quantity& stp_cancelled);
 
-    /// Quantity an aggressor from `account` could actually trade at prices it
-    /// is willing to pay, counting no further than `needed`. Used to decide a
-    /// fill-or-kill before anything has been mutated.
+    /// Quantity that would actually *fill* if an aggressor from `account`
+    /// submitted `needed` at prices it is willing to pay -- not the quantity
+    /// resting there. Under self-trade prevention the two differ, and the gap
+    /// is what decides a fill-or-kill correctly. Counts no further than
+    /// `needed`, and mutates nothing.
     template<typename Levels, typename Crosses>
     Quantity fillable(const Levels& levels, Crosses crosses, Quantity needed,
                       AccountId account) const;

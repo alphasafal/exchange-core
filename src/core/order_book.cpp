@@ -36,53 +36,82 @@ Quantity OrderBook::fillable(const Levels& levels, Crosses crosses, Quantity nee
     const SelfTradePolicy policy = instrument_.self_trade_policy;
     const bool prevention_active = policy != SelfTradePolicy::Allow && account.valid();
 
-    // Self-trade prevention makes the aggressor's own resting size unavailable
-    // to it, so counting level totals would let a fill-or-kill pass its
-    // fillability check against liquidity it can never trade with and then fill
-    // short -- reintroducing, through the back door, exactly the inconsistency
-    // the two-phase design exists to prevent. Under the cancel-incoming
-    // policies the aggressor also stops dead at its first own order, so nothing
-    // beyond that point counts either.
-    //
-    // Handling that needs a walk over individual orders rather than a read of
-    // the level total. The cost is paid only when prevention is active and only
-    // by fill-or-kill orders, which are a small fraction of real flow; every
-    // other path still reads one number per level.
-    const bool stops_at_own_order =
-        policy == SelfTradePolicy::CancelIncoming || policy == SelfTradePolicy::CancelBoth;
+    if (!prevention_active) {
+        // Nothing can come between the aggressor and the book, so resting size
+        // is fill size and one number per level answers the question.
+        Quantity available = 0;
+        for (const auto& [price, level] : levels) {
+            if (!crosses(price)) {
+                break;
+            }
+            available += level.total_quantity();
+            if (available >= needed) {
+                // Counting past what was asked for wastes a walk over levels
+                // that cannot change the answer.
+                return available;
+            }
+        }
+        return available;
+    }
 
-    Quantity available = 0;
+    // With prevention active, resting size and fill size come apart, so this
+    // walks individual orders and simulates what the matching loop would do.
+    //
+    // Each policy diverts quantity differently, and reading level totals gets
+    // all three cases wrong:
+    //
+    //   - cancel-incoming and cancel-both stop the aggressor dead at its first
+    //     own order, so nothing deeper is reachable however large it is;
+    //   - cancel-resting pulls the own order aside at no cost, so it should be
+    //     skipped but what is behind it still counts;
+    //   - decrement-both consumes the aggressor's own quantity against its own
+    //     order without printing a trade, so that quantity can never fill.
+    //
+    // The last case is the one that matters most here. Counting only tradeable
+    // liquidity makes a fill-or-kill look satisfiable when part of the order is
+    // about to be destroyed rather than filled, and it fills short -- which is
+    // precisely the outcome fill-or-kill exists to rule out.
+    //
+    // The cost of this walk is paid only when prevention is enabled and only by
+    // fill-or-kill orders, which are a small fraction of real flow.
+    Quantity unallocated = needed;
+    Quantity will_fill = 0;
+
     for (const auto& [price, level] : levels) {
         if (!crosses(price)) {
             break;
         }
+        for (OrderHandle handle = level.front(); handle != kNullHandle;
+             handle = pool_.node(handle).next) {
+            const Order& resting = pool_[handle];
 
-        if (!prevention_active) {
-            available += level.total_quantity();
-        } else {
-            for (OrderHandle handle = level.front(); handle != kNullHandle;
-                 handle = pool_.node(handle).next) {
-                const Order& resting = pool_[handle];
-                if (resting.account == account) {
-                    if (stops_at_own_order) {
-                        return available;
-                    }
-                    continue;
-                }
-                available += resting.remaining;
-                if (available >= needed) {
-                    return available;
+            if (resting.account == account) {
+                switch (policy) {
+                    case SelfTradePolicy::CancelIncoming:
+                    case SelfTradePolicy::CancelBoth:
+                        return will_fill;
+                    case SelfTradePolicy::CancelResting:
+                        continue;
+                    case SelfTradePolicy::DecrementBoth:
+                        unallocated -= std::min(unallocated, resting.remaining);
+                        if (unallocated == 0) {
+                            return will_fill;
+                        }
+                        continue;
+                    case SelfTradePolicy::Allow:
+                        break;  // Unreachable: prevention_active excludes it.
                 }
             }
-        }
 
-        if (available >= needed) {
-            // Counting past what was asked for wastes a walk over levels that
-            // cannot change the answer.
-            return available;
+            const Quantity traded = std::min(unallocated, resting.remaining);
+            will_fill += traded;
+            unallocated -= traded;
+            if (unallocated == 0) {
+                return will_fill;
+            }
         }
     }
-    return available;
+    return will_fill;
 }
 
 void OrderBook::drop_resting(PriceLevel& level, OrderHandle handle) {

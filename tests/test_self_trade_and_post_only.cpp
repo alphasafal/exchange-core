@@ -218,6 +218,54 @@ TEST(SelfTrade, FillOrKillRejectsWhenOnlyItsOwnLiquidityWouldFillIt) {
     EXPECT_EQ(book.quantity_at(Side::Sell, 100), 100u) << "the resting order must not be pulled";
 }
 
+TEST(SelfTrade, FillOrKillRejectsWhenDecrementBothWouldDestroyPartOfIt) {
+    OrderBook book{with_policy(SelfTradePolicy::DecrementBoth)};
+    OrderFactory make;
+    std::vector<Fill> fills;
+
+    book.submit(make.limit(1, Side::Sell, 100, 10, kFirm), fills);
+    book.submit(make.limit(2, Side::Sell, 100, 50, kOther), fills);
+    fills.clear();
+
+    // Found by the differential harness. There are 60 lots resting at a price
+    // this order will pay, so counting tradeable liquidity says "fillable".
+    // But decrement-both consumes 10 of the aggressor's own 50 against its own
+    // resting order without printing a trade, leaving only 40 that can actually
+    // fill. Accepting would fill 40 of an all-or-nothing 50 -- the exact
+    // outcome fill-or-kill exists to rule out.
+    const SubmitResult result = book.submit(
+        make.with_tif(make.limit(3, Side::Buy, 100, 50, kFirm), TimeInForce::FillOrKill), fills);
+
+    EXPECT_EQ(result.reject, RejectReason::FillOrKillUnfillable);
+    EXPECT_TRUE(fills.empty());
+    EXPECT_EQ(result.filled, 0u);
+    EXPECT_EQ(result.stp_cancelled, 0u);
+    EXPECT_EQ(book.quantity_at(Side::Sell, 100), 60u) << "nothing may move";
+    EXPECT_EQ(book.find(OrderId{1})->remaining, 10u);
+    EXPECT_EQ(book.find(OrderId{2})->remaining, 50u);
+}
+
+TEST(SelfTrade, FillOrKillSucceedsWhenItFillsBeforeReachingItsOwnOrder) {
+    OrderBook book{with_policy(SelfTradePolicy::DecrementBoth)};
+    OrderFactory make;
+    std::vector<Fill> fills;
+
+    book.submit(make.limit(1, Side::Sell, 100, 50, kOther), fills);
+    book.submit(make.limit(2, Side::Sell, 101, 10, kFirm), fills);
+    fills.clear();
+
+    // The own order sits a tick behind and is never reached, so the order fills
+    // completely. The check has to be precise in both directions: rejecting
+    // this would be just as wrong as accepting the case above.
+    const SubmitResult result = book.submit(
+        make.with_tif(make.limit(3, Side::Buy, 101, 50, kFirm), TimeInForce::FillOrKill), fills);
+
+    EXPECT_TRUE(result.accepted());
+    EXPECT_EQ(result.filled, 50u);
+    EXPECT_EQ(result.stp_cancelled, 0u);
+    EXPECT_EQ(book.quantity_at(Side::Sell, 101), 10u) << "the own order is untouched";
+}
+
 // --- Post-only -------------------------------------------------------------
 
 Order post_only(Order order) {
