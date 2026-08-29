@@ -88,6 +88,7 @@ add_library(xc_core STATIC
     src/journal/replayer.cpp
     src/journal/writer.cpp
     src/net/event_loop.cpp
+    src/net/tcp_gateway.cpp
     src/protocol/messages.cpp
     src/risk/kill_switch.cpp
     src/risk/risk_engine.cpp
