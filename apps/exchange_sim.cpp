@@ -11,6 +11,7 @@
 #include <string_view>
 #include <vector>
 
+#include "xc/journal/writer.hpp"
 #include "xc/util/build_info.hpp"
 #include "xc/venue.hpp"
 
@@ -37,12 +38,28 @@ std::vector<std::string> split(std::string_view text, char separator) {
     return parts;
 }
 
+const char* describe(xc::journal::Durability durability) {
+    switch (durability) {
+        case xc::journal::Durability::None:
+            return "none";
+        case xc::journal::Durability::Interval:
+            return "interval";
+        case xc::journal::Durability::Always:
+            return "always";
+    }
+    return "unknown";
+}
+
 void print_usage(const char* program) {
     std::cout << "usage: " << program << " [options]\n\n"
               << "  --port N            TCP order entry port (0 = ephemeral, default 0)\n"
               << "  --feed-port N       UDP market data port (default 0)\n"
               << "  --feed-group ADDR   market data destination (default 127.0.0.1)\n"
               << "  --journal DIR       write a journal to DIR (default: no journal)\n"
+              << "  --durability P      none | interval | always (default interval)\n"
+              << "                      'always' fsyncs every command, which on macOS is\n"
+              << "                      F_FULLFSYNC and costs milliseconds -- see\n"
+              << "                      docs/benchmarks.md\n"
               << "  --symbols A,B,C     instruments to list (default AAPL)\n"
               << "  --depth N           depth levels to publish, 0 for top of book only\n"
               << "  --max-order-qty N   per-account maximum order quantity\n"
@@ -65,6 +82,7 @@ int run(int argc, char** argv) {
     config.feed.port = 0;
     std::vector<std::string> symbols{"AAPL"};
     std::string journal_directory;
+    xc::journal::Durability durability = xc::journal::Durability::Interval;
     xc::SelfTradePolicy stp = xc::SelfTradePolicy::CancelIncoming;
     int stats_seconds = 5;
 
@@ -84,6 +102,19 @@ int run(int argc, char** argv) {
         } else if (arg == "--journal") {
             journal_directory = next();
             config.journal = xc::journal::WriterConfig{.directory = journal_directory};
+        } else if (arg == "--durability") {
+            const std::string policy = next();
+            if (policy == "none") {
+                durability = xc::journal::Durability::None;
+            } else if (policy == "interval") {
+                durability = xc::journal::Durability::Interval;
+            } else if (policy == "always") {
+                durability = xc::journal::Durability::Always;
+            } else {
+                std::cerr << "error: unknown durability policy '" << policy << "'\n";
+                print_usage(argv[0]);
+                return 1;
+            }
         } else if (arg == "--symbols") {
             symbols = split(next(), ',');
         } else if (arg == "--depth") {
@@ -118,6 +149,15 @@ int run(int argc, char** argv) {
         }
     }
 
+    // Applied after parsing rather than inside it, so --durability works on
+    // either side of --journal.
+    if (config.journal) {
+        config.journal->durability = durability;
+    } else if (durability != xc::journal::Durability::Interval) {
+        std::cerr << "error: --durability has no effect without --journal\n";
+        return 2;
+    }
+
     for (std::size_t i = 0; i < symbols.size(); ++i) {
         xc::Instrument instrument;
         instrument.id = xc::InstrumentId{i + 1};
@@ -150,6 +190,9 @@ int run(int argc, char** argv) {
     }
     std::cout << "\nself-trade:   " << xc::to_string(stp)
               << "\njournal:      " << (journal_directory.empty() ? "(none)" : journal_directory)
+              << (journal_directory.empty()
+                      ? ""
+                      : std::string(" (durability: ") + describe(durability) + ")")
               << "\nready. ctrl-c to stop.\n\n"
               << std::flush;
 
