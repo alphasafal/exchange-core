@@ -77,3 +77,47 @@ jobs:
 
       - name: Test
         run: ctest --preset ${{ matrix.preset }}
+
+  sanitize:
+    # The suite under AddressSanitizer and UndefinedBehaviorSanitizer. These
+    # catch a different class of defect from the warning set: -Wconversion sees
+    # a narrowing cast, ASan sees the read past the end of a slab that the cast
+    # made possible.
+    #
+    # Clang only, and one platform. The sanitizers are a property of the code,
+    # not of the toolchain, so running them on six configurations buys six
+    # copies of the same finding.
+    name: ${{ matrix.preset }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [asan, ubsan]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 llvm-18
+
+      - name: Configure
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} -j
+
+      - name: Test
+        # halt_on_error is the whole point. UBSan's default is to print a
+        # diagnostic and keep going, so the process exits 0 and CI goes green
+        # over live undefined behaviour -- a worse outcome than not running it,
+        # because it produces a badge that says the code is clean.
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:strict_string_checks=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          ASAN_SYMBOLIZER_PATH: /usr/bin/llvm-symbolizer-18
+          UBSAN_SYMBOLIZER_PATH: /usr/bin/llvm-symbolizer-18
+        run: ctest --preset ${{ matrix.preset }}
