@@ -121,3 +121,44 @@ jobs:
           ASAN_SYMBOLIZER_PATH: /usr/bin/llvm-symbolizer-18
           UBSAN_SYMBOLIZER_PATH: /usr/bin/llvm-symbolizer-18
         run: ctest --preset ${{ matrix.preset }}
+
+  thread-sanitize:
+    # ThreadSanitizer has exactly one thing in this repository to look at.
+    #
+    # The engine is single-threaded by design: commands arrive in a total
+    # order, are matched on the thread that read them, and determinism depends
+    # on that. The transport layer is single-threaded too -- the readiness loop
+    # multiplexes sockets rather than spawning per-connection threads.
+    #
+    # The only concurrent code is bench_wire, which runs the venue on one
+    # thread and the open-loop load generator on another, sharing an atomic
+    # stop flag and a socket. That is a real race surface, so it gets a real
+    # check; running TSan over the single-threaded suite as well would produce
+    # a reassuring green tick that examined nothing.
+    name: tsan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 llvm-18
+
+      - name: Configure
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: cmake --preset tsan
+
+      - name: Build
+        run: cmake --build --preset tsan -j
+
+      - name: Check the threaded benchmark for races
+        # A small workload on purpose. TSan's shadow memory makes this roughly
+        # twenty times slower, and its race detection depends on the number of
+        # distinct interleavings it observes, not on how long it runs.
+        env:
+          TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+          TSAN_SYMBOLIZER_PATH: /usr/bin/llvm-symbolizer-18
+        run: ./build/tsan/bench/bench_wire --orders 20000 --rate 50000 --warmup 2000
