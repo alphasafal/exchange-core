@@ -40,10 +40,25 @@ busy-poll NIC configuration.
 
 ## Data
 
-All order flow in this repository is **synthetic**. Where it is derived from
-public OHLCV bars, that means real historical *prices* driving *invented*
-order-by-order flow — actual exchange order flow is not public data and is not
-present here. See [data.md](data.md) for exactly how each dataset is produced.
+All order flow in this repository is **synthetic**, and there is no market
+data of any kind here — no datasets are tracked, derived from public bars or
+otherwise. Real exchange order flow is not public data, so nothing in these
+measurements resembles the arrival pattern of a real venue: no opening
+auction, no news spike, no correlated cancellation storm.
+
+Flow is produced in four places, all of them deliberate:
+
+| | |
+|---|---|
+| `tests/flow_generator.hpp` | seeded streams for the differential and invariant tests, over a narrow price band and a small account set so orders actually collide |
+| `fuzz/fuzz_order_flow.cpp` | the same shape, with libFuzzer choosing each field instead of an RNG |
+| `bench/bench_matching.cpp` | 40 price levels, one cancel per four submits, so the book is worked rather than only grown |
+| `apps/xc_client.cpp` | crossing orders over a real socket, for the simulator and the demo |
+
+An earlier version of this section described flow derived from public OHLCV
+bars and pointed at a document explaining it. Neither the data nor the
+document exists in this repository, and the sentence was carried over from a
+predecessor project.
 
 ## Measurement caveats
 
