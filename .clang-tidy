@@ -3,37 +3,58 @@
 # engine: lifetime bugs, silent narrowing, accidental copies, and undefined
 # behaviour. Stylistic checks are deliberately excluded -- clang-format owns
 # formatting, and a wall of naming warnings trains people to ignore the tool.
+#
+# Why each check below is disabled. These notes live here, above the list,
+# rather than inside it: `Checks:` is a YAML folded scalar, so every indented
+# line is part of the string and a '#' there is text rather than a comment.
+# Writing the rationale inline silently swallowed four of the exclusions into a
+# garbage check name, and the enforcing CI job is what found that.
+#
+#   modernize-use-nodiscard
+#       Fires on every const accessor in the project, 818 of them, which is
+#       how a useful idea becomes noise. [[nodiscard]] belongs by hand on the
+#       command-path results, where discarding one means discarding a
+#       rejection.
+#
+#   modernize-avoid-c-arrays
+#       Flags std::unique_ptr<std::byte[]> in the pool allocator, a
+#       runtime-sized buffer with no std::array equivalent. The fixed-size
+#       arrays this check was right about are now std::array.
+#
+#   modernize-use-transparent-functors
+#       std::map<Price, PriceLevel, std::greater<Price>> names its
+#       comparator's type on purpose. The transparent form buys heterogeneous
+#       lookup, which nothing here does, and hides what is being compared.
+#
+#   misc-no-recursion
+#       FlatHashMap::insert and grow call each other, bounded at depth two:
+#       grow rehashes into a table sized for the elements it already holds, so
+#       the inner insert cannot grow again. Restructuring a hot path to
+#       satisfy a lint is the wrong trade.
+#
+#   cert-dcl58-cpp
+#       Specialising std::hash for a program-defined type is explicitly
+#       permitted by [namespace.std], which is exactly what include/xc/core/
+#       ids.hpp does. The check cannot tell that apart from genuinely adding
+#       declarations to namespace std.
 Checks: >
   -*,
   bugprone-*,
   -bugprone-easily-swappable-parameters,
   cert-*,
   -cert-err58-cpp,
+  -cert-dcl58-cpp,
   clang-analyzer-*,
   cppcoreguidelines-pro-type-member-init,
   cppcoreguidelines-slicing,
   misc-*,
   -misc-non-private-member-variables-in-classes,
   -misc-include-cleaner,
-  # FlatHashMap::insert and grow call each other, bounded at depth two: grow
-  # rehashes into a table sized for the elements it already holds, so the
-  # inner insert cannot grow again. Restructuring the hot path to satisfy a
-  # lint would be the wrong trade.
   -misc-no-recursion,
   modernize-*,
   -modernize-use-trailing-return-type,
-  # Fires on every const accessor in the project -- 951 of them -- which is
-  # the usual way a useful idea becomes noise. [[nodiscard]] is applied by
-  # hand where discarding the result is the bug: the command-path results,
-  # where ignoring a SubmitResult means ignoring a rejection.
   -modernize-use-nodiscard,
-  # Flags std::unique_ptr<std::byte[]> in the pool allocator, which is a
-  # runtime-sized buffer and has no std::array equivalent. The fixed-size
-  # arrays this check was right about are now std::array.
   -modernize-avoid-c-arrays,
-  # std::map<Price, PriceLevel, std::greater<Price>> names its comparator's
-  # type on purpose. The transparent form buys heterogeneous lookup, which
-  # nothing here does, at the cost of hiding what is being compared.
   -modernize-use-transparent-functors,
   performance-*,
   portability-*,
@@ -41,11 +62,10 @@ Checks: >
   readability-const-return-type,
   readability-misleading-indentation,
   readability-redundant-*
-# Everything that survives the exclusions above is a finding worth acting on,
-# so CI treats them as errors. A lint that only warns is a lint that
-# accumulates -- and this configuration sat in the repository for weeks with
-# nothing running it, which is how it came to have 1229 outstanding findings
-# the first time it was run.
+# Everything surviving the exclusions above is worth acting on, so CI treats
+# them as errors. A lint that only warns is a lint that accumulates: this
+# configuration sat in the repository unenforced until it had 1229 outstanding
+# findings, one of which was a real durability bug.
 WarningsAsErrors: '*'
 HeaderFilterRegex: '.*/(include|src|apps|bench|fuzz)/.*'
 FormatStyle: file
