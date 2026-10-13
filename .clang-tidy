@@ -15,14 +15,37 @@ Checks: >
   misc-*,
   -misc-non-private-member-variables-in-classes,
   -misc-include-cleaner,
+  # FlatHashMap::insert and grow call each other, bounded at depth two: grow
+  # rehashes into a table sized for the elements it already holds, so the
+  # inner insert cannot grow again. Restructuring the hot path to satisfy a
+  # lint would be the wrong trade.
+  -misc-no-recursion,
   modernize-*,
   -modernize-use-trailing-return-type,
+  # Fires on every const accessor in the project -- 951 of them -- which is
+  # the usual way a useful idea becomes noise. [[nodiscard]] is applied by
+  # hand where discarding the result is the bug: the command-path results,
+  # where ignoring a SubmitResult means ignoring a rejection.
+  -modernize-use-nodiscard,
+  # Flags std::unique_ptr<std::byte[]> in the pool allocator, which is a
+  # runtime-sized buffer and has no std::array equivalent. The fixed-size
+  # arrays this check was right about are now std::array.
+  -modernize-avoid-c-arrays,
+  # std::map<Price, PriceLevel, std::greater<Price>> names its comparator's
+  # type on purpose. The transparent form buys heterogeneous lookup, which
+  # nothing here does, at the cost of hiding what is being compared.
+  -modernize-use-transparent-functors,
   performance-*,
   portability-*,
   readability-braces-around-statements,
   readability-const-return-type,
   readability-misleading-indentation,
   readability-redundant-*
-WarningsAsErrors: ''
-HeaderFilterRegex: '.*/(include|src|apps|bench)/.*'
+# Everything that survives the exclusions above is a finding worth acting on,
+# so CI treats them as errors. A lint that only warns is a lint that
+# accumulates -- and this configuration sat in the repository for weeks with
+# nothing running it, which is how it came to have 1229 outstanding findings
+# the first time it was run.
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*/(include|src|apps|bench|fuzz)/.*'
 FormatStyle: file

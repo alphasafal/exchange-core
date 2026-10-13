@@ -217,3 +217,40 @@ jobs:
             timeout-*
             oom-*
           if-no-files-found: ignore
+
+  tidy:
+    # clang-tidy, enforced. The configuration was committed with the project
+    # and nothing ran it until this job existed, by which point it had 1229
+    # outstanding findings -- of which one, a journal segment-name parser that
+    # accepted any filename starting with "segment-" and digits, was a real
+    # durability bug.
+    name: clang-tidy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install clang-tidy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 clang-tidy-18
+
+      - name: Configure
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        # Tests off: the analysis is of this project's code, and GoogleTest's
+        # headers would otherwise dominate the output of a tool that has no
+        # equivalent of -isystem for its own checks. Fuzzers on, because
+        # otherwise fuzz/ is absent from the compile database entirely and the
+        # job would silently lint three fewer files than its filter implies.
+        run: >
+          cmake -S . -B build/tidy
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          -DXC_BUILD_TESTS=OFF
+          -DXC_BUILD_FUZZERS=ON
+
+      - name: Run clang-tidy
+        run: >
+          run-clang-tidy-18 -p build/tidy -quiet
+          '^${{ github.workspace }}/(include|src|apps|bench|fuzz)/'
