@@ -137,8 +137,16 @@ int run(int argc, char** argv) {
         }
     }
 
-    std::cout << "state digest: 0x" << std::hex << std::setw(16) << std::setfill('0')
-              << report.state_digest << std::dec << std::setfill(' ') << '\n';
+    // Quiet prints the bare digest and nothing else, because the point of the
+    // flag is to be read by a script. A label here would have to be stripped
+    // by every caller, and the one in scripts/demo.sh duly got it wrong --
+    // passing "state digest: 0x..." to --verify, which parsed as 0x0 and
+    // compared unequal to everything.
+    if (!quiet) {
+        std::cout << "state digest: ";
+    }
+    std::cout << "0x" << std::hex << std::setw(16) << std::setfill('0') << report.state_digest
+              << std::dec << std::setfill(' ') << '\n';
 
     if (!quiet && depth > 0) {
         print_depth(engine, depth);
