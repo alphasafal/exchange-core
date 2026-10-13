@@ -31,7 +31,7 @@ struct GatewayConfig {
     std::size_t max_connections = 1024;
 
     /// Bytes read from a socket per pass.
-    std::size_t read_chunk = 64 * 1024;
+    std::size_t read_chunk = std::size_t{64} * 1024;
 
     /// How much unsent data may queue for one client before it is disconnected.
     ///

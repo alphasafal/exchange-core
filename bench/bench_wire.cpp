@@ -88,7 +88,9 @@ void print_usage(const char* program) {
 
 }  // namespace
 
-int main(int argc, char** argv) {
+namespace {
+
+int run(int argc, char** argv) {
     std::uint64_t order_count = 200'000;
     std::uint64_t target_rate = 100'000;
     std::uint64_t warmup = 20'000;
@@ -116,7 +118,7 @@ int main(int argc, char** argv) {
         target_rate = 1;
     }
 
-    std::signal(SIGPIPE, SIG_IGN);
+    static_cast<void>(std::signal(SIGPIPE, SIG_IGN));
     std::cout << xc::build_info().to_string();
 
     xc::VenueConfig config;
@@ -312,4 +314,22 @@ int main(int argc, char** argv) {
                      "         percentiles above, which therefore understate the tail.\n";
     }
     return 0;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    // An exception that escapes main calls std::terminate, which prints
+    // nothing useful about what actually failed. These are command-line tools
+    // that people run by hand, so a line saying what went wrong is worth more
+    // than a core dump.
+    try {
+        return run(argc, argv);
+    } catch (const std::exception& error) {
+        std::cerr << "error: " << error.what() << '\n';
+        return 1;
+    } catch (...) {
+        std::cerr << "error: unknown exception\n";
+        return 1;
+    }
 }

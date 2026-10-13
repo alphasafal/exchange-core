@@ -79,7 +79,9 @@ void print_depth(const xc::MatchingEngine& engine, std::size_t levels) {
 
 }  // namespace
 
-int main(int argc, char** argv) {
+namespace {
+
+int run(int argc, char** argv) {
     std::string journal_directory;
     std::string expected_digest;
     std::size_t depth = 5;
@@ -159,4 +161,22 @@ int main(int argc, char** argv) {
     }
 
     return 0;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    // An exception that escapes main calls std::terminate, which prints
+    // nothing useful about what actually failed. These are command-line tools
+    // that people run by hand, so a line saying what went wrong is worth more
+    // than a core dump.
+    try {
+        return run(argc, argv);
+    } catch (const std::exception& error) {
+        std::cerr << "error: " << error.what() << '\n';
+        return 1;
+    } catch (...) {
+        std::cerr << "error: unknown exception\n";
+        return 1;
+    }
 }

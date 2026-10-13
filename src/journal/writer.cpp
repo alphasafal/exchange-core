@@ -50,7 +50,17 @@ JournalWriter::JournalWriter(WriterConfig config) : config_(std::move(config)) {
 }
 
 JournalWriter::~JournalWriter() {
-    close();
+    // A destructor that throws during stack unwinding terminates the process,
+    // and taking the process down while it is already failing is the one thing
+    // a journal must not do. close() reports problems through fail(), whose
+    // string assignment can allocate.
+    try {
+        close();
+    } catch (...) {
+        // Nothing can be done with it here: the object is going away and the
+        // caller has no way to be told. Code that needs to know a journal shut
+        // down cleanly calls close() itself and checks healthy().
+    }
 }
 
 std::string JournalWriter::segment_name(std::uint32_t index) {

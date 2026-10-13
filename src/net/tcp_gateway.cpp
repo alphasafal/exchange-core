@@ -21,7 +21,7 @@ std::string errno_message(const char* what) {
 /// Erasing from the front on every partial write would be quadratic on a busy
 /// connection; never compacting would let the buffer grow without bound even
 /// though its live contents are small.
-constexpr std::size_t kCompactThreshold = 64 * 1024;
+constexpr std::size_t kCompactThreshold = std::size_t{64} * 1024;
 
 }  // namespace
 

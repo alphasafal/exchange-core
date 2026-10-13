@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <bit>
 #include <cassert>
+#include <cmath>
 #include <limits>
 
 namespace xc {
@@ -90,8 +91,11 @@ std::uint64_t Histogram::value_at(double percentile) const {
         }
     }
 
+    // llround rather than casting (x + 0.5): the cast truncates toward zero,
+    // which rounds half up only by accident and is implementation-defined if
+    // the value ever exceeds the integer range.
     const auto target = static_cast<std::uint64_t>(
-        (percentile / 100.0) * static_cast<double>(count_ + overflow_) + 0.5);
+        std::llround((percentile / 100.0) * static_cast<double>(count_ + overflow_)));
     std::uint64_t seen = 0;
     for (std::size_t i = 0; i < counts_.size(); ++i) {
         seen += counts_[i];

@@ -19,6 +19,7 @@
 // nobody else can reproduce.
 #include <chrono>
 #include <cstdint>
+#include <exception>
 #include <iomanip>
 #include <iostream>
 #include <random>
@@ -78,7 +79,9 @@ void print_usage(const char* program) {
 
 }  // namespace
 
-int main(int argc, char** argv) {
+namespace {
+
+int run(int argc, char** argv) {
     std::uint64_t order_count = 1'000'000;
     std::uint64_t warmup = 200'000;
     std::int64_t levels = 40;
@@ -281,4 +284,22 @@ int main(int argc, char** argv) {
                      "      count to measure steady state.\n";
     }
     return 0;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    // An exception that escapes main calls std::terminate, which prints
+    // nothing useful about what actually failed. These are command-line tools
+    // that people run by hand, so a line saying what went wrong is worth more
+    // than a core dump.
+    try {
+        return run(argc, argv);
+    } catch (const std::exception& error) {
+        std::cerr << "error: " << error.what() << '\n';
+        return 1;
+    } catch (...) {
+        std::cerr << "error: unknown exception\n";
+        return 1;
+    }
 }

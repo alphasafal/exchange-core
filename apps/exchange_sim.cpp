@@ -55,7 +55,9 @@ void print_usage(const char* program) {
 
 }  // namespace
 
-int main(int argc, char** argv) {
+namespace {
+
+int run(int argc, char** argv) {
     xc::VenueConfig config;
     config.gateway.bind_address = "127.0.0.1";
     config.gateway.port = 0;
@@ -133,11 +135,11 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::signal(SIGINT, handle_signal);
-    std::signal(SIGTERM, handle_signal);
+    static_cast<void>(std::signal(SIGINT, handle_signal));
+    static_cast<void>(std::signal(SIGTERM, handle_signal));
     // A client that disconnects mid-write would otherwise kill the process with
     // SIGPIPE. The gateway already handles the resulting error from send().
-    std::signal(SIGPIPE, SIG_IGN);
+    static_cast<void>(std::signal(SIGPIPE, SIG_IGN));
 
     std::cout << xc::build_info().to_string() << '\n'
               << "order entry:  127.0.0.1:" << venue.order_entry_port() << " (tcp)\n"
@@ -173,4 +175,22 @@ int main(int argc, char** argv) {
     std::cout << "\nstopping.\n";
     venue.stop();
     return 0;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    // An exception that escapes main calls std::terminate, which prints
+    // nothing useful about what actually failed. These are command-line tools
+    // that people run by hand, so a line saying what went wrong is worth more
+    // than a core dump.
+    try {
+        return run(argc, argv);
+    } catch (const std::exception& error) {
+        std::cerr << "error: " << error.what() << '\n';
+        return 1;
+    } catch (...) {
+        std::cerr << "error: unknown exception\n";
+        return 1;
+    }
 }
