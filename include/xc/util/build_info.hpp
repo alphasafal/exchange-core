@@ -15,10 +15,10 @@ struct BuildInfo {
     std::string version;      ///< Project version, e.g. "0.1.0".
     std::string compiler_id;  ///< "Clang", "AppleClang", "GNU", "MSVC".
     std::string compiler_version;
-    std::string build_type;    ///< "Release", "Debug", "RelWithDebInfo".
-    std::string cxx_standard;  ///< Resolved from __cplusplus, not assumed.
-    std::string sanitizer;     ///< "none", "address", "thread", "undefined".
-    bool assertions_enabled;   ///< True when NDEBUG is not defined.
+    std::string build_type;           ///< "Release", "Debug", "RelWithDebInfo".
+    std::string cxx_standard;         ///< Resolved from __cplusplus, not assumed.
+    std::string sanitizer;            ///< "none", "address", "thread", "undefined".
+    bool assertions_enabled = false;  ///< True when NDEBUG is not defined.
 
     /// One line per fact, suitable for pasting into a benchmark report.
     std::string to_string() const;

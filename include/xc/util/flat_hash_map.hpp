@@ -132,7 +132,7 @@ class FlatHashMap {
         // them straight into a power-of-two table would place consecutive ids
         // in consecutive slots -- which is fine until a range is erased and the
         // resulting tombstone run makes every probe walk it.
-        std::uint64_t hash = static_cast<std::uint64_t>(std::hash<Key>{}(key));
+        auto hash = static_cast<std::uint64_t>(std::hash<Key>{}(key));
         hash ^= hash >> 30;
         hash *= 0xBF58476D1CE4E5B9ULL;
         hash ^= hash >> 27;

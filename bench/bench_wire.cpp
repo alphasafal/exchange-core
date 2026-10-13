@@ -26,6 +26,7 @@
 #include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <array>
 
 #include <atomic>
 #include <chrono>
@@ -168,16 +169,16 @@ int run(int argc, char** argv) {
     std::vector<std::uint8_t> request;
     std::vector<std::uint8_t> inbound;
     inbound.reserve(1 << 20);
-    std::uint8_t chunk[65536];
+    std::array<std::uint8_t, 65536> chunk{};
 
     std::uint64_t acked = 0;
     const auto drain = [&] {
         while (true) {
-            const ssize_t received = ::recv(fd, chunk, sizeof(chunk), MSG_DONTWAIT);
+            const ssize_t received = ::recv(fd, chunk.data(), chunk.size(), MSG_DONTWAIT);
             if (received <= 0) {
                 break;
             }
-            inbound.insert(inbound.end(), chunk, chunk + received);
+            inbound.insert(inbound.end(), chunk.data(), chunk.data() + received);
         }
         std::size_t offset = 0;
         while (true) {

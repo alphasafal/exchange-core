@@ -2,6 +2,7 @@
 
 #include <fcntl.h>
 #include <unistd.h>
+#include <array>
 
 #include <algorithm>
 #include <cerrno>
@@ -56,10 +57,10 @@ JournalWriter::~JournalWriter() {
     // string assignment can allocate.
     try {
         close();
-    } catch (...) {
-        // Nothing can be done with it here: the object is going away and the
-        // caller has no way to be told. Code that needs to know a journal shut
-        // down cleanly calls close() itself and checks healthy().
+    } catch (...) {  // NOLINT(bugprone-empty-catch)
+        // Swallowing is the point, and the only option. Nothing can be done: the object is going
+        // away and the caller has no way to be told. Code that needs to know a journal shut down
+        // cleanly calls close() itself and checks healthy().
     }
 }
 
@@ -70,12 +71,12 @@ std::string JournalWriter::segment_name(std::uint32_t index) {
     // The buffer is sized for the widest output the format can produce, so the
     // return value cannot indicate truncation; it is checked anyway, because a
     // silently truncated name would produce a segment the reader cannot find.
-    char name[kSegmentNameLength + 1];
-    const int written = std::snprintf(name, sizeof(name), "segment-%08u.xcj", index);
+    std::array<char, kSegmentNameLength + 1> name{};
+    const int written = std::snprintf(name.data(), name.size(), "segment-%08u.xcj", index);
     if (written != static_cast<int>(kSegmentNameLength)) {
         return {};
     }
-    return name;
+    return name.data();
 }
 
 std::optional<std::uint32_t> JournalWriter::parse_segment_name(std::string_view name) {

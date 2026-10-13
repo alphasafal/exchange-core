@@ -10,6 +10,7 @@
 #include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <array>
 
 #include <chrono>
 #include <cstring>
@@ -180,7 +181,7 @@ int run(int argc, char** argv) {
     Counters counters;
     std::vector<std::uint8_t> request;
     std::vector<std::uint8_t> inbound;
-    std::uint8_t chunk[16384];
+    std::array<std::uint8_t, 16384> chunk{};
 
     // The feed is drained as the run proceeds rather than at the end. A
     // subscriber that never reads lets its socket buffer overflow, and would
@@ -210,11 +211,11 @@ int run(int argc, char** argv) {
     const auto drain_session = [&] {
         for (const int session : sessions) {
             while (true) {
-                const ssize_t received = ::recv(session, chunk, sizeof(chunk), MSG_DONTWAIT);
+                const ssize_t received = ::recv(session, chunk.data(), chunk.size(), MSG_DONTWAIT);
                 if (received <= 0) {
                     break;
                 }
-                inbound.insert(inbound.end(), chunk, chunk + received);
+                inbound.insert(inbound.end(), chunk.data(), chunk.data() + received);
             }
         }
 

@@ -98,7 +98,7 @@ class ByteReader {
         }
         const auto* begin = reinterpret_cast<const char*>(data_.data() + offset_);
         offset_ += length;
-        return std::string(begin, length);
+        return {begin, length};
     }
 
     /// Reads an enumeration, failing when the value is outside its range.

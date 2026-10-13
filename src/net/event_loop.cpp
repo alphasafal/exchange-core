@@ -5,6 +5,7 @@
 #include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <array>
 
 #include <cerrno>
 #include <cstring>
@@ -163,7 +164,7 @@ bool apply(int handle, int fd, Interest interest, bool enable, std::string& erro
     const bool want_write = enable && (static_cast<std::uint8_t>(interest) &
                                        static_cast<std::uint8_t>(Interest::Write));
 
-    struct kevent changes[2];
+    std::array<struct kevent, 2> changes{};
     EV_SET(&changes[0], static_cast<std::uintptr_t>(fd), EVFILT_READ,
            want_read ? (EV_ADD | EV_ENABLE) : EV_DELETE, 0, 0, nullptr);
     EV_SET(&changes[1], static_cast<std::uintptr_t>(fd), EVFILT_WRITE,

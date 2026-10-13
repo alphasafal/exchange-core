@@ -55,7 +55,7 @@ bool RiskEngine::consume_rate_budget(AccountState& state, Nanos now) const {
     // burst tolerance. The result has no window boundary to exploit, needs one
     // integer of state per account, and never drifts, because nothing is ever
     // divided into a floating point rate.
-    const Nanos interval = static_cast<Nanos>(1'000'000'000ULL / rate);
+    const auto interval = static_cast<Nanos>(1'000'000'000ULL / rate);
     const std::uint32_t burst = state.limits.message_burst == 0 ? 1 : state.limits.message_burst;
     const Nanos tolerance = static_cast<Nanos>(burst - 1) * interval;
 
