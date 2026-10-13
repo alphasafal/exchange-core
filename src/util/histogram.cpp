@@ -34,19 +34,41 @@ std::size_t Histogram::index_for(std::uint64_t value) const {
 }
 
 std::uint64_t Histogram::lowest_value_at(std::size_t index) const {
-    if (index < sub_bucket_count_) {
+    // Bounded by twice the half-count rather than by sub_bucket_count_. The two
+    // are equal by construction, but the bound is written in the quantity the
+    // next line divides by, so the exponent is visibly at least one here rather
+    // than one member relationship away.
+    if (index < 2 * sub_bucket_half_count_) {
         return index;
     }
-    const std::uint64_t bucket = index / sub_bucket_half_count_ - 1;
+
+    // Derived by addition rather than by subtracting one from the quotient. The
+    // subtraction is correct for every index this is called with, and wraps to
+    // 2^64-1 for any index that is not -- producing a shift wider than the type,
+    // which is undefined rather than merely wrong.
+    const std::uint64_t above_linear = index - 2 * sub_bucket_half_count_;
+    const std::uint64_t bucket = above_linear / sub_bucket_half_count_ + 1;
     const std::uint64_t sub = (index % sub_bucket_half_count_) + sub_bucket_half_count_;
+
+    // counts_ is sized so that no index within it reaches this, but nothing
+    // local says so, and the cost of saying it is one predictable branch on a
+    // reporting path that never runs during measurement.
+    if (bucket >= 64) {
+        return max_value_;
+    }
     return sub << bucket;
 }
 
 std::uint64_t Histogram::highest_value_at(std::size_t index) const {
-    if (index < sub_bucket_count_) {
+    // Same bound and the same reasoning as lowest_value_at.
+    if (index < 2 * sub_bucket_half_count_) {
         return index;
     }
-    const std::uint64_t bucket = index / sub_bucket_half_count_ - 1;
+    const std::uint64_t above_linear = index - 2 * sub_bucket_half_count_;
+    const std::uint64_t bucket = above_linear / sub_bucket_half_count_ + 1;
+    if (bucket >= 64) {
+        return max_value_;
+    }
     // Every value in a bucket shares its count, so the highest one it could
     // represent is the lowest plus the bucket's width less one.
     return lowest_value_at(index) + (std::uint64_t{1} << bucket) - 1;
