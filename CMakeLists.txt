@@ -123,7 +123,22 @@ target_compile_definitions(xc_core PRIVATE
 add_library(xc_alloc_counter STATIC src/util/allocation_counter.cpp)
 target_include_directories(xc_alloc_counter PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(xc_alloc_counter PUBLIC xc_flags)
-target_compile_definitions(xc_alloc_counter PRIVATE XC_COUNT_ALLOCATIONS)
+# A sanitizer runtime replaces global operator new and delete for its own
+# bookkeeping, and so does this counter. On Linux the two definitions collide
+# at link time; on macOS the sanitizer interposes dynamically and one
+# replacement silently wins, which is worse, because the counts are then wrong
+# rather than absent.
+#
+# So counting is compiled out whenever a sanitizer is active, and that fact is
+# propagated to dependents so the allocation tests can skip instead of
+# observing zero allocations and declaring success. Tests passing because the
+# thing they measure was switched off is the exact failure that
+# allocation_counting_enabled() was added to catch.
+if(XC_SANITIZER STREQUAL "none")
+    target_compile_definitions(xc_alloc_counter PRIVATE XC_COUNT_ALLOCATIONS)
+else()
+    target_compile_definitions(xc_alloc_counter PUBLIC XC_SANITIZER_OWNS_ALLOCATOR)
+endif()
 
 add_subdirectory(apps)
 

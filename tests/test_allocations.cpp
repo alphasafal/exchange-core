@@ -45,7 +45,23 @@ NewOrder order(std::uint64_t id, Side side, Price price, Quantity quantity) {
     return command;
 }
 
-TEST(Allocations, TheCounterIsActuallyEnabledInThisBuild) {
+/// Named to keep the test names stable: these are still Allocations.*.
+///
+/// A sanitizer owns global operator new, so a sanitizer build cannot count
+/// allocations and the counter is compiled out there. Skipping is the only
+/// honest outcome -- every assertion below would otherwise pass by measuring
+/// nothing.
+class Allocations : public ::testing::Test {
+  protected:
+    void SetUp() override {
+#ifdef XC_SANITIZER_OWNS_ALLOCATOR
+        GTEST_SKIP() << "allocation counting is compiled out under a sanitizer: "
+                        "the sanitizer runtime owns global operator new";
+#endif
+    }
+};
+
+TEST_F(Allocations, TheCounterIsActuallyEnabledInThisBuild) {
     // Every other test in this file would pass trivially if counting were off,
     // reporting zero allocations because nothing was counting them. This is the
     // assertion that stops the rest from being vacuous -- and it has already
@@ -66,7 +82,7 @@ TEST(Allocations, TheCounterIsActuallyEnabledInThisBuild) {
     escaping_sink.reset();
 }
 
-TEST(Allocations, SubmittingAnOrderAllocatesNothingInSteadyState) {
+TEST_F(Allocations, SubmittingAnOrderAllocatesNothingInSteadyState) {
     ManualClock clock;
     MatchingEngine engine{clock};
     ASSERT_TRUE(engine.add_instrument(venue_instrument()));
@@ -95,7 +111,7 @@ TEST(Allocations, SubmittingAnOrderAllocatesNothingInSteadyState) {
         << " bytes)";
 }
 
-TEST(Allocations, CancellingAllocatesNothing) {
+TEST_F(Allocations, CancellingAllocatesNothing) {
     ManualClock clock;
     MatchingEngine engine{clock};
     ASSERT_TRUE(engine.add_instrument(venue_instrument()));
@@ -112,7 +128,7 @@ TEST(Allocations, CancellingAllocatesNothing) {
     EXPECT_EQ(scope.allocations(), 0u) << "cancellation is the most frequent operation there is";
 }
 
-TEST(Allocations, MatchingAndFillReportingAllocateNothing) {
+TEST_F(Allocations, MatchingAndFillReportingAllocateNothing) {
     ManualClock clock;
     MatchingEngine engine{clock};
     ASSERT_TRUE(engine.add_instrument(venue_instrument()));
@@ -132,7 +148,7 @@ TEST(Allocations, MatchingAndFillReportingAllocateNothing) {
     EXPECT_EQ(scope.allocations(), 0u);
 }
 
-TEST(Allocations, TakingADepthSnapshotAllocatesNothingAfterWarmup) {
+TEST_F(Allocations, TakingADepthSnapshotAllocatesNothingAfterWarmup) {
     ManualClock clock;
     MatchingEngine engine{clock};
     ASSERT_TRUE(engine.add_instrument(venue_instrument()));
@@ -154,7 +170,7 @@ TEST(Allocations, TakingADepthSnapshotAllocatesNothingAfterWarmup) {
     EXPECT_EQ(scope.allocations(), 0u);
 }
 
-TEST(Allocations, RecordingALatencySampleAllocatesNothing) {
+TEST_F(Allocations, RecordingALatencySampleAllocatesNothing) {
     Histogram histogram;
     histogram.record(1);  // Buckets are sized at construction.
 

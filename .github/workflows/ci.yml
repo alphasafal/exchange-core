@@ -146,13 +146,15 @@ jobs:
           sudo apt-get install -y clang-18 llvm-18
 
       - name: Configure
+        # Tests off: the suite is single-threaded, so the only target worth
+        # building here is the one with threads in it.
         env:
           CC: clang-18
           CXX: clang++-18
-        run: cmake --preset tsan
+        run: cmake --preset tsan -DXC_BUILD_TESTS=OFF
 
       - name: Build
-        run: cmake --build --preset tsan -j
+        run: cmake --build --preset tsan --target bench_wire -j
 
       - name: Check the threaded benchmark for races
         # A small workload on purpose. TSan's shadow memory makes this roughly
