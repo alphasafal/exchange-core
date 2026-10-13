@@ -1,0 +1,8 @@
+{
+  "htmlLabels": false,
+  "flowchart": { "htmlLabels": false, "curve": "basis", "nodeSpacing": 45, "rankSpacing": 50 },
+  "themeVariables": {
+    "fontFamily": "ui-sans-serif, -apple-system, Segoe UI, Helvetica, Arial, sans-serif",
+    "fontSize": "15px"
+  }
+}
