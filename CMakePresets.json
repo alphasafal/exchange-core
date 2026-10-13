@@ -43,6 +43,17 @@
       "inherits": "base",
       "displayName": "ThreadSanitizer",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "XC_SANITIZER": "thread" }
+    },
+    {
+      "name": "fuzz",
+      "inherits": "base",
+      "displayName": "libFuzzer targets (Clang only, ASan + UBSan)",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "XC_SANITIZER": "address,undefined",
+        "XC_BUILD_FUZZERS": "ON",
+        "XC_BUILD_TESTS": "OFF"
+      }
     }
   ],
   "buildPresets": [
@@ -51,7 +62,8 @@
     { "name": "debug",   "configurePreset": "debug"   },
     { "name": "asan",    "configurePreset": "asan"    },
     { "name": "ubsan",   "configurePreset": "ubsan"   },
-    { "name": "tsan",    "configurePreset": "tsan"    }
+    { "name": "tsan",    "configurePreset": "tsan"    },
+    { "name": "fuzz",    "configurePreset": "fuzz"    }
   ],
   "testPresets": [
     {

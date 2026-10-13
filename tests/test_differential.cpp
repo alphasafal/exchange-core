@@ -2,9 +2,11 @@
 
 #include <random>
 #include <sstream>
+#include <string>
 #include <vector>
 
 #include "flow_generator.hpp"
+#include "model/compare.hpp"
 #include "model/reference_book.hpp"
 #include "order_book_fixture.hpp"
 #include "xc/core/order_book.hpp"
@@ -17,75 +19,25 @@ using testing::describe;
 using testing::generate_flow;
 using testing::test_instrument;
 
+/// Thin gtest wrappers over the shared comparators in model/compare.hpp. The
+/// comparison itself lives there because fuzz_order_flow drives it too, and a
+/// fuzzer checking a different notion of "the same" from the test it extends
+/// could pass while this one would have failed.
 ::testing::AssertionResult same_fills(const std::vector<Fill>& actual,
                                       const std::vector<Fill>& expected) {
-    if (actual.size() != expected.size()) {
-        return ::testing::AssertionFailure()
-               << "fill count " << actual.size() << " != " << expected.size();
+    const std::string difference = model::diff_fills(actual, expected);
+    if (difference.empty()) {
+        return ::testing::AssertionSuccess();
     }
-    for (std::size_t i = 0; i < actual.size(); ++i) {
-        const Fill& a = actual[i];
-        const Fill& e = expected[i];
-        if (a.price != e.price || a.quantity != e.quantity ||
-            a.aggressor_order != e.aggressor_order || a.resting_order != e.resting_order ||
-            a.aggressor_side != e.aggressor_side || a.resting_filled != e.resting_filled) {
-            return ::testing::AssertionFailure()
-                   << "fill " << i << " differs: engine {px=" << a.price << " qty=" << a.quantity
-                   << " agg=" << a.aggressor_order.value() << " rest=" << a.resting_order.value()
-                   << "} vs model {px=" << e.price << " qty=" << e.quantity
-                   << " agg=" << e.aggressor_order.value() << " rest=" << e.resting_order.value()
-                   << "}";
-        }
-    }
-    return ::testing::AssertionSuccess();
+    return ::testing::AssertionFailure() << difference;
 }
 
 ::testing::AssertionResult same_book(const OrderBook& book, const model::ReferenceBook& model) {
-    std::vector<Order> engine_orders;
-    book.for_each_resting_order([&](const Order& order) { engine_orders.push_back(order); });
-    const std::vector<Order> model_orders = model.resting_orders();
-
-    if (engine_orders.size() != model_orders.size()) {
-        return ::testing::AssertionFailure()
-               << "resting order count " << engine_orders.size() << " != " << model_orders.size();
+    const std::string difference = model::diff_books(book, model);
+    if (difference.empty()) {
+        return ::testing::AssertionSuccess();
     }
-    for (std::size_t i = 0; i < engine_orders.size(); ++i) {
-        const Order& a = engine_orders[i];
-        const Order& e = model_orders[i];
-        if (a.id != e.id || a.price != e.price || a.remaining != e.remaining ||
-            a.quantity != e.quantity || a.side != e.side || a.sequence != e.sequence) {
-            return ::testing::AssertionFailure()
-                   << "resting order " << i << " differs: engine {id=" << a.id.value()
-                   << " px=" << a.price << " rem=" << a.remaining << " qty=" << a.quantity
-                   << " seq=" << a.sequence << "} vs model {id=" << e.id.value()
-                   << " px=" << e.price << " rem=" << e.remaining << " qty=" << e.quantity
-                   << " seq=" << e.sequence << "}";
-        }
-    }
-
-    const TopOfBook engine_top = book.top_of_book();
-    const TopOfBook model_top = model.top_of_book();
-    if (engine_top.bid_price != model_top.bid_price ||
-        engine_top.ask_price != model_top.ask_price ||
-        engine_top.bid_quantity != model_top.bid_quantity ||
-        engine_top.ask_quantity != model_top.ask_quantity) {
-        return ::testing::AssertionFailure()
-               << "top of book differs: engine {" << engine_top.bid_price << "x"
-               << engine_top.bid_quantity << " / " << engine_top.ask_price << "x"
-               << engine_top.ask_quantity << "} vs model {" << model_top.bid_price << "x"
-               << model_top.bid_quantity << " / " << model_top.ask_price << "x"
-               << model_top.ask_quantity << "}";
-    }
-
-    DepthSnapshot engine_depth;
-    DepthSnapshot model_depth;
-    book.depth(10, engine_depth);
-    model.depth(10, model_depth);
-    if (engine_depth.bids != model_depth.bids || engine_depth.asks != model_depth.asks) {
-        return ::testing::AssertionFailure() << "aggregated depth differs";
-    }
-
-    return ::testing::AssertionSuccess();
+    return ::testing::AssertionFailure() << difference;
 }
 
 void run_stream(std::uint64_t seed, SelfTradePolicy policy, std::size_t commands) {

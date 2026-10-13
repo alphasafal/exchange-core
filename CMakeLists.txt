@@ -23,6 +23,8 @@ option(XC_BUILD_BENCH  "Build the benchmark harnesses"                 ON)
 # option() coerces its value to a boolean, so the sanitizer selector has to be
 # a cache STRING or "none" silently becomes OFF and reaches the compiler as
 # -fsanitize=OFF.
+option(XC_BUILD_FUZZERS "Build the libFuzzer targets (Clang only)" OFF)
+
 set(XC_SANITIZER "none" CACHE STRING "Sanitizer to enable: none|address|thread|undefined")
 set_property(CACHE XC_SANITIZER PROPERTY STRINGS none address thread undefined)
 
@@ -148,6 +150,16 @@ endif()
 
 if(XC_BUILD_TESTS)
     enable_testing()
+endif()
+
+# fuzz/ holds the libFuzzer targets and the portable corpus runners that replay
+# their oracles as ordinary tests, so it is needed for either -- and must come
+# after enable_testing(), or its add_test() calls register nothing.
+if(XC_BUILD_FUZZERS OR XC_BUILD_TESTS)
+    add_subdirectory(fuzz)
+endif()
+
+if(XC_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 

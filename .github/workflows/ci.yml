@@ -164,3 +164,56 @@ jobs:
           TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
           TSAN_SYMBOLIZER_PATH: /usr/bin/llvm-symbolizer-18
         run: ./build/tsan/bench/bench_wire --orders 20000 --rate 50000 --warmup 2000
+
+  fuzz:
+    # A regression gate, not a fuzzing campaign.
+    #
+    # Sixty seconds per target finds nothing new; it re-runs the committed
+    # corpus and explores a little around it, so a change that breaks an input
+    # already known to matter fails here. Real campaigns run for hours
+    # somewhere else, and anything they find gets committed to fuzz/corpus/ --
+    # at which point the corpus runners in the ordinary test suite catch it on
+    # every platform, which is the point of keeping those separate.
+    name: fuzz
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 llvm-18
+
+      - name: Configure
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: cmake --preset fuzz
+
+      - name: Build
+        run: cmake --build --preset fuzz -j
+
+      - name: Fuzz
+        env:
+          ASAN_OPTIONS: abort_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          ASAN_SYMBOLIZER_PATH: /usr/bin/llvm-symbolizer-18
+        run: |
+          for target in protocol journal order_flow; do
+            echo "::group::fuzz_${target}"
+            ./build/fuzz/fuzz/fuzz_${target} \
+              fuzz/corpus/${target} \
+              -max_total_time=60 -print_final_stats=1
+            echo "::endgroup::"
+          done
+
+      - name: Upload any crash found
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: |
+            crash-*
+            timeout-*
+            oom-*
+          if-no-files-found: ignore
