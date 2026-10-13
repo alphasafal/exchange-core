@@ -43,8 +43,10 @@ using xc::journal::RecoveryReport;
 
 void check(bool condition, const char* what) {
     if (!condition) {
-        std::fputs(what, stderr);
-        std::fputc('\n', stderr);
+        // Discarded deliberately: the next statement aborts, so there is
+        // nothing a failed write could be handled by.
+        static_cast<void>(std::fputs(what, stderr));
+        static_cast<void>(std::fputc('\n', stderr));
         std::abort();
     }
 }
@@ -83,7 +85,7 @@ class ScratchDirectory {
     ScratchDirectory(const ScratchDirectory&) = delete;
     ScratchDirectory& operator=(const ScratchDirectory&) = delete;
 
-    const std::filesystem::path& path() const { return path_; }
+    [[nodiscard]] const std::filesystem::path& path() const { return path_; }
 
   private:
     std::filesystem::path path_;
@@ -100,7 +102,7 @@ RecoveryReport recover(const std::filesystem::path& directory, std::vector<Recor
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size) {
     // A segment larger than this tells us nothing a smaller one does not, and
     // the per-iteration file write is what bounds this target's throughput.
-    if (size > 64 * 1024) {
+    if (size > std::size_t{64} * 1024) {
         return 0;
     }
 

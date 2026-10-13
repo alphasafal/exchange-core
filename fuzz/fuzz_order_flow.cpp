@@ -45,7 +45,7 @@ class Input {
   public:
     Input(const std::uint8_t* data, std::size_t size) : data_(data), size_(size) {}
 
-    bool empty() const { return offset_ >= size_; }
+    [[nodiscard]] bool empty() const { return offset_ >= size_; }
 
     std::uint8_t byte() {
         if (offset_ >= size_) {
@@ -68,8 +68,9 @@ class Input {
 };
 
 void fail(const std::string& what) {
-    std::fputs(what.c_str(), stderr);
-    std::fputc('\n', stderr);
+    // Discarded deliberately: the next statement aborts.
+    static_cast<void>(std::fputs(what.c_str(), stderr));
+    static_cast<void>(std::fputc('\n', stderr));
     std::abort();
 }
 

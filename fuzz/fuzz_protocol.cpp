@@ -55,8 +55,10 @@ void check(bool condition, const char* what) {
     if (!condition) {
         // abort() rather than assert(): NDEBUG is set in this build type, and a
         // fuzz oracle that an optimiser is allowed to delete is not an oracle.
-        std::fputs(what, stderr);
-        std::fputc('\n', stderr);
+        // Discarded deliberately: the next statement aborts, so there is
+        // nothing a failed write could be handled by.
+        static_cast<void>(std::fputs(what, stderr));
+        static_cast<void>(std::fputc('\n', stderr));
         std::abort();
     }
 }

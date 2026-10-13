@@ -65,7 +65,7 @@ SubmitResult ReferenceBook::match(Order& incoming, std::vector<Fill>& fills) {
         if (index < 0) {
             break;
         }
-        const std::size_t slot = static_cast<std::size_t>(index);
+        const auto slot = static_cast<std::size_t>(index);
         Order& resting = orders_[slot];
 
         if (prevention_active && resting.account == incoming.account) {
