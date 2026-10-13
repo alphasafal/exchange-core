@@ -3,6 +3,8 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include "xc/journal/reader.hpp"
@@ -51,6 +53,90 @@ std::vector<Record> read_all(const std::filesystem::path& directory, RecoveryRep
     JournalReader reader(directory);
     report = reader.read([&](const Record& record) { records.push_back(record); });
     return records;
+}
+
+TEST(SegmentName, RoundTripsEveryRepresentableIndex) {
+    for (const std::uint32_t index :
+         {0u, 1u, 7u, 42u, 99u, 1000u, 12'345'678u, JournalWriter::kMaxSegmentIndex}) {
+        const std::string name = JournalWriter::segment_name(index);
+        ASSERT_FALSE(name.empty()) << index;
+        EXPECT_EQ(JournalWriter::parse_segment_name(name), index) << name;
+    }
+}
+
+TEST(SegmentName, RejectsFilenamesThatOnlyLookLikeSegments) {
+    // Every one of these was accepted by the sscanf-based parser this replaced,
+    // because sscanf reports success once the number is assigned and never
+    // checks the literal that follows it.
+    for (const std::string_view name : {
+             "segment-00000003.xcj.bak",  // a backup left in the directory
+             "segment-00000007.tmp",      // a half-finished copy
+             "segment-00000009",          // no extension
+             "segment-00000004.xcjunk",   // extension is a prefix of junk
+             "segment--1.xcj",            // %u took the sign and wrapped
+             "segment-12345678901234.xcj",
+             "segment-0000003.xcj",  // seven digits
+             "segment-000000003.xcj",
+             "segment-      3.xcj",  // %u skips leading whitespace
+             "segment-+0000003.xcj",
+             "segment-0000003a.xcj",
+             "SEGMENT-00000003.xcj",
+             "xsegment-00000003.xcj",
+             "segment-00000003.XCJ",
+             "",
+         }) {
+        EXPECT_FALSE(JournalWriter::parse_segment_name(name).has_value()) << name;
+    }
+}
+
+TEST(JournalIo, IgnoresNonSegmentFilesWhenRecovering) {
+    TempJournal temp;
+    {
+        JournalWriter writer(WriterConfig{.directory = temp.path()});
+        ASSERT_TRUE(writer.open()) << writer.last_error();
+        for (SeqNum sequence = 1; sequence <= 4; ++sequence) {
+            ASSERT_TRUE(writer.append(order_record(sequence), 0));
+        }
+        writer.close();
+    }
+
+    // A backup of the segment, which the previous parser read as a second copy
+    // of the same journal: recovery saw sequence 1 twice and reported a gap on
+    // a journal that was never damaged.
+    const std::filesystem::path segment = temp.path() / JournalWriter::segment_name(1);
+    std::filesystem::copy_file(segment, temp.path() / "segment-00000001.xcj.bak");
+    std::ofstream(temp.path() / "notes.txt") << "not a journal";
+
+    RecoveryReport report;
+    const std::vector<Record> records = read_all(temp.path(), report);
+    EXPECT_EQ(report.outcome, RecoveryOutcome::Clean) << report.message;
+    ASSERT_EQ(records.size(), 4u);
+    for (std::size_t i = 0; i < records.size(); ++i) {
+        EXPECT_EQ(records[i].sequence, static_cast<SeqNum>(i + 1));
+    }
+}
+
+TEST(JournalIo, DoesNotTakeItsNextIndexFromANonSegmentFile) {
+    TempJournal temp;
+    std::filesystem::create_directories(temp.path());
+
+    // "segment--1.xcj" parsed as 4294967295 under the old scanner. The writer
+    // takes the highest index it finds, so the next roll incremented past the
+    // top of the type and wrapped to zero -- producing segment-00000000.xcj
+    // holding the newest records, which the reader then sorts to the front and
+    // replays first.
+    std::ofstream(temp.path() / "segment--1.xcj") << "junk";
+
+    JournalWriter writer(WriterConfig{.directory = temp.path()});
+    ASSERT_TRUE(writer.open()) << writer.last_error();
+    EXPECT_EQ(writer.current_segment().filename().string(), JournalWriter::segment_name(1));
+    ASSERT_TRUE(writer.append(order_record(1), 0));
+    writer.close();
+
+    RecoveryReport report;
+    const std::vector<Record> records = read_all(temp.path(), report);
+    EXPECT_EQ(report.outcome, RecoveryOutcome::Clean) << report.message;
+    ASSERT_EQ(records.size(), 1u);
 }
 
 TEST(JournalIo, RoundTripsRecordsInWriteOrder) {

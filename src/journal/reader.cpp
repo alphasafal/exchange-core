@@ -1,5 +1,7 @@
 #include "xc/journal/reader.hpp"
 
+#include "xc/journal/writer.hpp"
+
 #include <unistd.h>
 
 #include <algorithm>
@@ -7,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <optional>
 #include <system_error>
 #include <utility>
 
@@ -18,10 +21,12 @@ std::vector<std::filesystem::path> JournalReader::segments() const {
     std::vector<std::pair<std::uint32_t, std::filesystem::path>> found;
     std::error_code ec;
     for (const auto& entry : std::filesystem::directory_iterator(directory_, ec)) {
-        const std::string name = entry.path().filename().string();
-        std::uint32_t index = 0;
-        if (std::sscanf(name.c_str(), "segment-%08u.xcj", &index) == 1) {
-            found.emplace_back(index, entry.path());
+        // Deliberately the writer's own parser rather than a second copy of
+        // the convention. Two independent implementations of a file-naming
+        // rule is how both ends came to accept "segment-3.xcj.bak".
+        if (const std::optional<std::uint32_t> index =
+                JournalWriter::parse_segment_name(entry.path().filename().string())) {
+            found.emplace_back(*index, entry.path());
         }
     }
 

@@ -5,14 +5,22 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <charconv>
 #include <cstdio>
 #include <cstring>
+#include <optional>
 #include <string_view>
 #include <system_error>
 #include <utility>
 
 namespace xc::journal {
 namespace {
+
+constexpr std::string_view kSegmentPrefix = "segment-";
+constexpr std::string_view kSegmentSuffix = ".xcj";
+constexpr std::size_t kSegmentDigits = 8;
+constexpr std::size_t kSegmentNameLength =
+    kSegmentPrefix.size() + kSegmentDigits + kSegmentSuffix.size();
 
 /// Persists a file descriptor's contents to durable storage.
 ///
@@ -48,9 +56,39 @@ JournalWriter::~JournalWriter() {
 std::string JournalWriter::segment_name(std::uint32_t index) {
     // Zero-padded so that lexicographic order matches chronological order, in
     // a directory listing as well as in the reader.
-    char name[32];
-    std::snprintf(name, sizeof(name), "segment-%08u.xcj", index);
+    //
+    // The buffer is sized for the widest output the format can produce, so the
+    // return value cannot indicate truncation; it is checked anyway, because a
+    // silently truncated name would produce a segment the reader cannot find.
+    char name[kSegmentNameLength + 1];
+    const int written = std::snprintf(name, sizeof(name), "segment-%08u.xcj", index);
+    if (written != static_cast<int>(kSegmentNameLength)) {
+        return {};
+    }
     return name;
+}
+
+std::optional<std::uint32_t> JournalWriter::parse_segment_name(std::string_view name) {
+    if (name.size() != kSegmentNameLength) {
+        return std::nullopt;
+    }
+    if (!name.starts_with(kSegmentPrefix) || !name.ends_with(kSegmentSuffix)) {
+        return std::nullopt;
+    }
+
+    const std::string_view digits = name.substr(kSegmentPrefix.size(), kSegmentDigits);
+
+    // from_chars accepts no sign and no leading whitespace, and the length
+    // check above has already fixed the field width -- so requiring it to
+    // consume every character leaves exactly eight decimal digits as the only
+    // thing this accepts.
+    std::uint32_t index = 0;
+    const char* const end = digits.data() + digits.size();
+    const std::from_chars_result result = std::from_chars(digits.data(), end, index);
+    if (result.ec != std::errc{} || result.ptr != end) {
+        return std::nullopt;
+    }
+    return index;
 }
 
 bool JournalWriter::open() {
@@ -66,10 +104,9 @@ bool JournalWriter::open() {
     // as it is, so recovery can see where the previous run stopped.
     std::uint32_t highest = 0;
     for (const auto& entry : std::filesystem::directory_iterator(config_.directory, ec)) {
-        const std::string name = entry.path().filename().string();
-        std::uint32_t index = 0;
-        if (std::sscanf(name.c_str(), "segment-%08u.xcj", &index) == 1) {
-            highest = std::max(highest, index);
+        if (const std::optional<std::uint32_t> index =
+                parse_segment_name(entry.path().filename().string())) {
+            highest = std::max(highest, *index);
         }
     }
     segment_index_ = highest;
@@ -86,6 +123,11 @@ bool JournalWriter::roll_segment() {
         ++syncs_;
         ::close(fd_);
         fd_ = -1;
+    }
+
+    if (segment_index_ >= kMaxSegmentIndex) {
+        fail("segment index would exceed the name format's eight digits");
+        return false;
     }
 
     ++segment_index_;

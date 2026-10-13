@@ -2,7 +2,9 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "xc/journal/record.hpp"
@@ -108,8 +110,31 @@ class JournalWriter {
     /// Path of the segment currently being written.
     const std::filesystem::path& current_segment() const noexcept { return current_path_; }
 
+    /// Largest index the name format can represent.
+    ///
+    /// The name carries eight digits, so indices stop here rather than growing
+    /// a ninth and quietly breaking the symmetry with parse_segment_name. At
+    /// the default segment size that bound is some petabytes of journal, so
+    /// reaching it means something is wrong, not that the limit is too low.
+    static constexpr std::uint32_t kMaxSegmentIndex = 99'999'999;
+
     /// Segment file name for an index, e.g. "segment-00000001.xcj".
     static std::string segment_name(std::uint32_t index);
+
+    /// The index encoded in a segment file name, or nullopt if `name` is not
+    /// one. The exact inverse of segment_name.
+    ///
+    /// Strict deliberately. The obvious implementation,
+    ///
+    ///     std::sscanf(name, "segment-%08u.xcj", &index) == 1
+    ///
+    /// succeeds as soon as the number is assigned and never checks the
+    /// trailing literal at all, so it accepts "segment-00000003.xcj.bak" and
+    /// "segment-00000007.tmp" as live segments, and reads "segment--1.xcj" as
+    /// 4294967295 because %u takes the sign. Both the reader and the writer
+    /// scan the journal directory, so a lenient parser there is not a cosmetic
+    /// problem: see the tests for what each of those filenames costs.
+    static std::optional<std::uint32_t> parse_segment_name(std::string_view name);
 
   private:
     bool roll_segment();
