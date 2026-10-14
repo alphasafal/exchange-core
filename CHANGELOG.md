@@ -56,7 +56,7 @@ errors.
 
 ### Verification
 
-- 374 tests: unit, integration, property-based invariants, and a differential
+- 383 tests: unit, integration, property-based invariants, and a differential
   harness against an O(N²) reference matcher used as an executable specification.
 - Three libFuzzer targets with a committed corpus, whose oracles also run as
   ordinary tests on every platform.

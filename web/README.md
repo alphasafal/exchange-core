@@ -7,7 +7,7 @@ The matching engine compiled to WebAssembly, matching live on a page.
 ## What it is
 
 `xc_core` — the same `OrderBook`, `MatchingEngine`, `RiskEngine` and
-`KillSwitch` that the native binaries and the 374-test suite run against,
+`KillSwitch` that the native binaries and the 383-test suite run against,
 compiled by Emscripten and driven from JavaScript. It is not a model of the
 engine written for the web. If the book is wrong here, it is wrong there.
 

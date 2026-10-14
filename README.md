@@ -4,7 +4,7 @@
 [![demo](https://github.com/alphasafal/exchange-core/actions/workflows/pages.yml/badge.svg)](https://alphasafal.github.io/exchange-core/)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white)](CMakeLists.txt)
 [![licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-374-success)](tests/)
+[![tests](https://img.shields.io/badge/tests-383-success)](tests/)
 
 ### ▸ [Watch it match orders in your browser](https://alphasafal.github.io/exchange-core/)
 
@@ -36,7 +36,7 @@ cmake --build --preset release -j
 ctest --preset release
 ```
 
-374 tests. Presets: `release` (portable `-O2`), `native` (tuned to the building
+383 tests. Presets: `release` (portable `-O2`), `native` (tuned to the building
 machine, used for benchmarks), `debug`, `asan`, `ubsan`, `tsan` and `fuzz`.
 
 To see exactly what a build was produced with — compiler, version, flags, build
@@ -114,10 +114,13 @@ regenerate with `./scripts/run_bench.sh`. Apple M2, macOS 26.2, AppleClang 17,
 | Allocations on the matching path | **0** |
 | Loopback round trip, order to ack | **~16–20 µs**, of which matching is ~75 ns |
 
-Cost is not flat in the depth of the book: it rises about **5 ns per doubling**
-of the price-level count, which is the red-black tree inside `std::map`.
-[docs/benchmarks.md](docs/benchmarks.md) measures that curve, names the flat
-price ladder that would remove it, and says why that has not been built yet.
+**Cost is flat in the depth of the book** — 106 ns at 10 price levels, 111 ns at
+5,000. Price levels live in a flat ladder indexed by tick with a bitmap over the
+occupied ones, so finding a level is an array index and finding the *best* level
+is three `countr_zero` instructions. The `std::map` it replaced rose 27% across
+that range. What it costs is a bounded price band per instrument;
+[docs/benchmarks.md](docs/benchmarks.md) has the before and after, and
+[docs/limitations.md](docs/limitations.md) has the constraint.
 
 Three caveats that belong beside those numbers rather than in a footnote.
 
