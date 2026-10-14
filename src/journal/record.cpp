@@ -20,6 +20,13 @@ void encode_payload(const Record& record, std::vector<std::uint8_t>& out) {
             writer.i64(instrument.tick_size);
             writer.u64(instrument.lot_size);
             writer.u64(instrument.min_quantity);
+            // The price band decides which prices the book will accept, so it
+            // has to survive into a replay. Reconstructing an instrument with
+            // the default band would let a replay take orders the original
+            // rejected, or reject ones it took, and the replayed book would
+            // then diverge from the one being reconstructed.
+            writer.i64(instrument.min_price);
+            writer.i64(instrument.max_price);
             writer.u8(instrument.display_exponent);
             writer.u8(static_cast<std::uint8_t>(instrument.self_trade_policy));
             break;
@@ -71,6 +78,8 @@ bool decode_payload(RecordType type, std::span<const std::uint8_t> payload, Reco
             instrument.tick_size = reader.i64();
             instrument.lot_size = reader.u64();
             instrument.min_quantity = reader.u64();
+            instrument.min_price = reader.i64();
+            instrument.max_price = reader.i64();
             instrument.display_exponent = reader.u8();
             instrument.self_trade_policy = reader.enumeration<SelfTradePolicy>(
                 static_cast<std::uint8_t>(SelfTradePolicy::DecrementBoth));

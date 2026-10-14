@@ -267,7 +267,7 @@ int run(int argc, char** argv) {
               << '\n'
               << "  slab high water      " << book->pool().high_water_mark() << '\n'
               << "  slab growth events   " << book->pool().growth_events() << '\n'
-              << "  level pool chunks    " << book->level_node_pool().chunks() << '\n';
+              << "  ladder levels/side   " << book->instrument().tick_count() << '\n';
 
     if (journal) {
         std::cout << "\njournal\n"

@@ -11,10 +11,10 @@
 #include "xc/core/instrument.hpp"
 #include "xc/core/order.hpp"
 #include "xc/core/order_pool.hpp"
+#include "xc/core/price_ladder.hpp"
 #include "xc/core/price_level.hpp"
 #include "xc/core/withdrawal.hpp"
 #include "xc/util/flat_hash_map.hpp"
-#include "xc/util/node_pool.hpp"
 
 namespace xc {
 
@@ -190,9 +190,6 @@ class OrderBook {
     const Instrument& instrument() const noexcept { return instrument_; }
     const OrderPool& pool() const noexcept { return pool_; }
 
-    /// The pool backing the price level maps, for the allocation tests.
-    const NodePool& level_node_pool() const noexcept { return level_nodes_; }
-
     /// Total quantity resting on one side. Walks every level, so it is a
     /// diagnostic and test helper rather than a hot-path query.
     Quantity total_quantity(Side side) const;
@@ -201,14 +198,12 @@ class OrderBook {
     /// Bids descend and asks ascend, so `begin()` is the best price on either
     /// side and the matching loop is identical for both.
     ///
-    /// Both draw their nodes from a pool. A node-based map allocates every time
-    /// a price level is created, and levels at the touch empty and refill
-    /// continuously under real flow -- so that is an allocation on the matching
-    /// path at the busiest price in the book, not a start-up cost.
-    using LevelEntry = std::pair<const Price, PriceLevel>;
-    using LevelAllocator = PoolAllocator<LevelEntry>;
-    using BidLevels = std::map<Price, PriceLevel, std::greater<Price>, LevelAllocator>;
-    using AskLevels = std::map<Price, PriceLevel, std::less<Price>, LevelAllocator>;
+    /// A flat ladder indexed by tick, not an ordered map. The map was correct
+    /// and cost about 5 ns per doubling of the level count -- a red-black tree
+    /// walked on every rest and every cancel. The ladder makes both O(1) and
+    /// costs a bounded price band instead; see price_ladder.hpp.
+    using BidLevels = PriceLadder<true>;
+    using AskLevels = PriceLadder<false>;
 
     template<typename Levels, typename Crosses>
     void match(Levels& levels, Order& incoming, Crosses crosses, std::vector<Fill>& fills,
@@ -241,10 +236,6 @@ class OrderBook {
 
     Instrument instrument_;
     OrderPool pool_;
-
-    /// Declared before the maps so it outlives them: they borrow it, and a
-    /// member is destroyed in reverse declaration order.
-    NodePool level_nodes_;
 
     BidLevels bids_;
     AskLevels asks_;

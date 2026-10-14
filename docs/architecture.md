@@ -135,7 +135,7 @@ for matching, no horizontal scaling, no failover.
 
 | structure | where | why not the obvious thing |
 |---|---|---|
-| `std::map<Price, PriceLevel>` with a pooled node allocator | `order_book.cpp` | Prices are sparse and the best price must be found in O(1); a sorted vector moves on every new level. `std::map` allocates a node per level, so the allocator is a `NodePool` sized from the instrument. |
+| Flat price ladder with a hierarchical bitmap | `price_ladder.hpp` | Finding a level is an array index; finding the *best* level is three `countr_zero` instructions over a summary bitmap. Replaced a `std::map`, whose red-black tree cost about 5 ns per doubling of level count. Costs a bounded price band, which is the trade [benchmarks.md](benchmarks.md) measures. |
 | Intrusive doubly-linked list of orders within a level | `price_level.cpp` | Price-time priority needs FIFO per level and O(1) removal from the middle for cancels. Intrusive links mean no per-order container node. |
 | Slab + free list, 32-bit handles | `order_pool.cpp` | Orders are fixed size and churn constantly. A handle is half a pointer, so an index entry is smaller and the book's hot structures fit in less cache. |
 | `FlatHashMap<OrderId, OrderHandle>` | `order_book.cpp` | `std::unordered_map` allocates a node per insert — `reserve` sizes buckets, not nodes — so the order index allocated on every resting order. Open addressing in one array allocates once. |

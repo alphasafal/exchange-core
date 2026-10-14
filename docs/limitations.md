@@ -35,6 +35,16 @@ made.
 single-threaded, because determinism is worth more here than parallelism.
 Throughput scales by symbol partitioning, not by threading a single book.
 
+**Bounded in price.** An instrument declares the band it may quote in, and the
+book holds a price level for every tick in it. A price outside the band is
+rejected with `InvalidPrice`; it is not stored and the band does not move. This
+is a deliberate trade — it is what lets the book index levels by tick instead of
+walking a tree, which [benchmarks.md](benchmarks.md) measures at a flat cost
+regardless of depth — but it is a constraint a general-purpose book would not
+impose, and an instrument whose price can move arbitrarily far is not
+representable. Memory is one `PriceLevel` per tick per side, so a wide band
+costs memory rather than time.
+
 **Not hardware-accelerated.** No kernel bypass, no DPDK, no FPGA, no
 busy-poll NIC configuration.
 

@@ -38,7 +38,11 @@ enum class RecordType : std::uint8_t {
 /// A reader that meets a version it does not understand stops rather than
 /// guessing. Silently misparsing an old journal would produce a plausible but
 /// wrong reconstruction, which is worse than refusing to produce one.
-inline constexpr std::uint8_t kRecordVersion = 1;
+/// Version 2 added the instrument's price band. A reader rejects a version it
+/// does not know rather than guessing at the layout, so a journal written by
+/// version 1 is reported as corrupt instead of being silently misparsed with
+/// the band's bytes read as something else.
+inline constexpr std::uint8_t kRecordVersion = 2;
 
 /// Fixed-size prefix on every record.
 ///

@@ -107,6 +107,8 @@ TEST(JournalRecord, RoundTripsAnInstrumentDefinition) {
     original.instrument.id = InstrumentId{4};
     original.instrument.symbol = "LONG-SYMBOL-NAME";
     original.instrument.tick_size = 25;
+    original.instrument.min_price = 50;
+    original.instrument.max_price = 5'000;
     original.instrument.lot_size = 100;
     original.instrument.min_quantity = 100;
     original.instrument.display_exponent = 4;
@@ -118,6 +120,12 @@ TEST(JournalRecord, RoundTripsAnInstrumentDefinition) {
     EXPECT_EQ(decoded.record.instrument.tick_size, 25);
     EXPECT_EQ(decoded.record.instrument.lot_size, 100u);
     EXPECT_EQ(decoded.record.instrument.display_exponent, 4);
+    // Asserted, not merely set above: the band decides which prices a replayed
+    // book accepts, so an encoder that wrote it and a decoder that ignored it
+    // would still pass every other check here while silently rebuilding a
+    // different instrument.
+    EXPECT_EQ(decoded.record.instrument.min_price, 50);
+    EXPECT_EQ(decoded.record.instrument.max_price, 5'000);
     EXPECT_EQ(decoded.record.instrument.self_trade_policy, SelfTradePolicy::DecrementBoth);
 }
 

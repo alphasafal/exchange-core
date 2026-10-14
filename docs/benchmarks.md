@@ -101,49 +101,59 @@ allocation per order, which is recorded in the history:
 
 ## How cost scales with the shape of the book
 
-The figures above are for a 40-level book. Cost is not flat in the number of
-price levels, and it is worth knowing the shape rather than quoting one number.
+Cost used to rise with the number of price levels, because the book held them
+in a `std::map` and every rest and every cancel walked a red-black tree. It no
+longer does.
 
 Same workload, same binary, varying only the number of distinct price levels
-the flow spreads across. Best of three runs each, LTO build:
+the flow spreads across. Best of three runs each, LTO build, both arms measured
+in the same session so whatever else the machine was doing hit them equally:
 
-| Price levels | ns per command |
-|---|---|
-| 2 | 85.0 |
-| 10 | 114.6 |
-| 40 | 121.2 |
-| 200 | 126.7 |
-| 1,000 | 135.2 |
-| 5,000 | 142.0 |
+| Price levels | `std::map` | flat ladder | change |
+|---|---|---|---|
+| 10 | 112.8 ns | 106.2 ns | 5.9% |
+| 40 | 119.6 ns | 110.1 ns | 7.9% |
+| 200 | 124.9 ns | 110.4 ns | 11.6% |
+| 1,000 | 133.3 ns | 111.3 ns | 16.5% |
+| 5,000 | 143.3 ns | 111.6 ns | **22.1%** |
 
-That is roughly **5 ns per doubling** of the level count — the signature of a
-balanced binary tree, which is what `std::map` is. Every rest and every cancel
-does a `find` on the price map, and each doubling adds one more node to walk
-and one more chance to miss cache.
+The interesting column is not the last one, it is the third. The map cost rose
+27% across that range — about 5 ns per doubling, the signature of a balanced
+binary tree. The ladder reads **106, 110, 110, 111, 111**: flat across a 500×
+change in book depth, because finding a level is an array index and finding the
+*best* level is three `countr_zero` instructions over a summary bitmap. Neither
+depends on how many levels are live.
+
+A flat curve is worth more than the percentages. It means the engine's cost can
+be stated without asking how deep the book is, and that a venue listing a
+thickly quoted instrument is not quietly paying for it.
 
 These runs were taken on a machine that was not idle, so the absolute values
 sit above the 75 ns headline measured earlier under better conditions. The
-*shape* is what this table is for, and the shape is unaffected: each row met
-the same interference as the others.
+comparison is unaffected: both arms met the same interference.
 
-### The optimisation this points at, which has not been done
+### What it cost
 
-A flat price ladder — an array indexed by `(price - base) / tick_size` with a
-bitmap of occupied levels — turns both the lookup and the best-price scan into
-O(1) and removes the log term entirely. That is what production matching
-engines do, and the table above is the argument for it: at 40 levels it would
-be worth roughly 25 ns a command, and at 1,000 levels roughly 50.
+A ladder has to be bounded. An instrument now declares the price band it may
+quote in, and a price outside it is rejected with `InvalidPrice` rather than
+stored — a real constraint the map did not impose, recorded in
+[limitations.md](limitations.md). Memory is `sizeof(PriceLevel)` per tick per
+side, allocated once: about 1.5 MB a side at the default 65,535-tick band.
 
-It is not implemented here. A ladder has to handle prices outside its window,
-which means either a bounded band plus a map fallback — two code paths through
-the hottest function in the system — or a hard limit on the price range an
-instrument may quote. That is a real design decision rather than a
-micro-optimisation, and it is not worth making badly to improve a number.
+The band also had to be added to the journal's instrument record, because it
+decides which prices a book accepts and a replay that rebuilt the instrument
+with a default band could take orders the original rejected. That is a record
+format change, so `kRecordVersion` went to 2.
 
-The project has the safety net that would make it tractable: the differential
-harness against the reference model, the structural invariants, and the
-order-flow fuzzer would all catch a ladder that matched differently from the
-tree. It is recorded here as measured, understood and deliberately outstanding.
+### How it was checked
+
+The ladder is diffed against `std::map` directly, with the same comparator, over
+6,000 random insert and erase operations per seed in both directions — the same
+technique the book uses against the reference matcher, one level down. On top of
+that the whole existing suite ran unchanged: the differential harness against
+the O(N²) reference model, the structural invariants, and the fuzz corpora. A
+data structure swap under the hottest function in the system is exactly what
+that safety net was built for.
 
 ## Journal durability
 

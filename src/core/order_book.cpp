@@ -11,27 +11,20 @@ namespace {
 ///
 /// Generous on purpose: a level costs tens of bytes, and the cost of being
 /// wrong is an allocation on the matching path.
-constexpr std::size_t kReservedLevelNodes = 4096;
-
 }  // namespace
 
 OrderBook::OrderBook(Instrument instrument, std::size_t initial_capacity)
     : instrument_(std::move(instrument)),
       pool_(initial_capacity),
-      bids_(std::greater<Price>{}, LevelAllocator{&level_nodes_}),
-      asks_(std::less<Price>{}, LevelAllocator{&level_nodes_}),
       // Sized so that a book holding up to its expected order count never
       // rehashes, and therefore never allocates on the matching path.
       index_(initial_capacity * 2) {
-    // The map's node type is internal, so its size is discovered by inserting
-    // one and removing it again. Reserving afterwards means the first genuine
-    // level creation draws from the pool rather than from the allocator.
-    bids_.emplace(Price{1}, PriceLevel{});
-    const std::size_t node_size = level_nodes_.block_size();
-    bids_.clear();
-    if (node_size > 0) {
-        level_nodes_.reserve(node_size, kReservedLevelNodes);
-    }
+    // Both ladders are allocated once, here, and never grow. There is no
+    // equivalent of the old map's per-level allocation, which happened at the
+    // busiest price in the book because levels at the touch empty and refill
+    // continuously under real flow.
+    bids_.configure(instrument_.ladder_base(), instrument_.tick_size, instrument_.tick_count());
+    asks_.configure(instrument_.ladder_base(), instrument_.tick_size, instrument_.tick_count());
 }
 
 RejectReason OrderBook::validate(const Order& order) const {
