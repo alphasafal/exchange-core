@@ -99,6 +99,52 @@ allocation per order, which is recorded in the history:
 | After pooling the price-level map nodes | 26 |
 | After sizing the book from the workload | **0** |
 
+## How cost scales with the shape of the book
+
+The figures above are for a 40-level book. Cost is not flat in the number of
+price levels, and it is worth knowing the shape rather than quoting one number.
+
+Same workload, same binary, varying only the number of distinct price levels
+the flow spreads across. Best of three runs each, LTO build:
+
+| Price levels | ns per command |
+|---|---|
+| 2 | 85.0 |
+| 10 | 114.6 |
+| 40 | 121.2 |
+| 200 | 126.7 |
+| 1,000 | 135.2 |
+| 5,000 | 142.0 |
+
+That is roughly **5 ns per doubling** of the level count — the signature of a
+balanced binary tree, which is what `std::map` is. Every rest and every cancel
+does a `find` on the price map, and each doubling adds one more node to walk
+and one more chance to miss cache.
+
+These runs were taken on a machine that was not idle, so the absolute values
+sit above the 75 ns headline measured earlier under better conditions. The
+*shape* is what this table is for, and the shape is unaffected: each row met
+the same interference as the others.
+
+### The optimisation this points at, which has not been done
+
+A flat price ladder — an array indexed by `(price - base) / tick_size` with a
+bitmap of occupied levels — turns both the lookup and the best-price scan into
+O(1) and removes the log term entirely. That is what production matching
+engines do, and the table above is the argument for it: at 40 levels it would
+be worth roughly 25 ns a command, and at 1,000 levels roughly 50.
+
+It is not implemented here. A ladder has to handle prices outside its window,
+which means either a bounded band plus a map fallback — two code paths through
+the hottest function in the system — or a hard limit on the price range an
+instrument may quote. That is a real design decision rather than a
+micro-optimisation, and it is not worth making badly to improve a number.
+
+The project has the safety net that would make it tractable: the differential
+harness against the reference model, the structural invariants, and the
+order-flow fuzzer would all catch a ladder that matched differently from the
+tree. It is recorded here as measured, understood and deliberately outstanding.
+
 ## Journal durability
 
 The same workload under each policy. The differences are the cost of the
