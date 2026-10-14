@@ -1,0 +1,25 @@
+# clang-format owns C++ formatting; this covers the files it does not.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+
+[*.{cpp,hpp,c,h}]
+indent_size = 4
+
+[*.{yml,yaml,json,md}]
+indent_size = 2
+
+[*.md]
+# Markdown gives two trailing spaces a meaning, so leave them alone here.
+trim_trailing_whitespace = false
+
+[{CMakeLists.txt,*.cmake}]
+indent_size = 4
+
+[*.sh]
+indent_size = 4

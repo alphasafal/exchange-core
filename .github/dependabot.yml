@@ -1,0 +1,13 @@
+# The project has exactly one runtime dependency (GoogleTest, pinned to a tag in
+# tests/CMakeLists.txt), so this watches the GitHub Actions that CI depends on.
+# Those are the ones that drift silently: a checkout action that changes its
+# default behaviour alters what every job tests without a line of this repo
+# changing.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci

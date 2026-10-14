@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/alphasafal/exchange-core/security/advisories/new
+    about: Report privately as a draft advisory rather than in a public issue. See SECURITY.md.
+  - name: What this project is not
+    url: https://github.com/alphasafal/exchange-core/blob/main/docs/limitations.md
+    about: No authentication, no clearing, no multi-node anything. Absent features are documented, not bugs.
