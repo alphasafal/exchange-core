@@ -6,25 +6,34 @@ name: demo
 # drifts from the source that produced it, and the one thing this demo claims
 # is that it runs the real engine -- which is only true if it is compiled from
 # the same tree on every push.
+# Pull requests build but do not deploy. Without that, a change to this file --
+# including every Dependabot bump of the actions it uses -- could only be found
+# to be broken after it was already on main and the live page was already
+# wrong. Five such bumps arrived showing twelve green checks, none of which
+# touched a single line they changed, because the only workflow that runs on a
+# pull request is ci.yml and none of these actions appear in it.
 on:
   push:
     branches: [main]
-    paths:
+    paths: &demo_paths
       - 'web/**'
       - 'src/**'
       - 'include/**'
       - '.github/workflows/pages.yml'
+  pull_request:
+    paths: *demo_paths
   workflow_dispatch:
 
+# Declared per job rather than for the whole workflow, so a build triggered by a
+# pull request cannot write to Pages even in principle.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
-# Never cancel a half-finished deployment: the live page would be left serving
-# whichever files happened to have uploaded.
+# Keyed by ref. Deployments from main still serialise against each other -- a
+# cancelled one would leave the live page serving whichever files happened to
+# have uploaded -- while pull request builds no longer queue behind them.
 concurrency:
-  group: pages
+  group: demo-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -51,7 +60,14 @@ jobs:
 
   deploy:
     needs: build
+    # Nothing is published from a pull request. deploy-pages itself therefore
+    # stays untested until a change reaches main, which is unavoidable: the
+    # action's only behaviour is to deploy.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
