@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>exchange-core — live order book</title>
+<meta name="description" content="A C++20 price-time-priority matching engine compiled to WebAssembly, matching live in your browser.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>📈</text></svg>">
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --line: #30363d;
+    --fg: #e6edf3; --dim: #8b949e;
+    --bid: #2ea043; --bid-bg: rgba(46,160,67,.16);
+    --ask: #f85149; --ask-bg: rgba(248,81,73,.16);
+    --accent: #58a6ff; --warn: #d29922;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #ffffff; --panel: #f6f8fa; --line: #d0d7de;
+      --fg: #1f2328; --dim: #636c76;
+      --bid-bg: rgba(46,160,67,.12); --ask-bg: rgba(248,81,73,.12);
+      --accent: #0969da;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 16px 64px; }
+  h1 { font-size: 24px; margin: 0 0 4px; letter-spacing: -.01em; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .07em;
+       color: var(--dim); margin: 0 0 10px; font-weight: 600; }
+  a { color: var(--accent); }
+  .sub { color: var(--dim); margin: 0 0 20px; max-width: 70ch; }
+  .panel { background: var(--panel); border: 1px solid var(--line);
+           border-radius: 10px; padding: 16px; }
+  .grid { display: grid; gap: 16px; grid-template-columns: 1.15fr .85fr; }
+  .row { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); margin-bottom: 16px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+
+  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 13px; }
+  th { text-align: right; color: var(--dim); font-weight: 500; padding: 3px 8px;
+       font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+  th:first-child, td:first-child { text-align: left; }
+  td { text-align: right; padding: 3px 8px; position: relative; }
+  tbody tr td:first-child { font-variant-numeric: tabular-nums; }
+  .bidrow td { color: var(--bid); }
+  .askrow td { color: var(--ask); }
+  .bar { position: absolute; inset: 1px auto 1px 0; border-radius: 3px; z-index: 0; }
+  .bidrow .bar { background: var(--bid-bg); }
+  .askrow .bar { background: var(--ask-bg); }
+  .cellv { position: relative; z-index: 1; }
+
+  .stat { font-family: var(--mono); font-size: 21px; font-variant-numeric: tabular-nums; }
+  .statlabel { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  .spread { text-align: center; color: var(--dim); font-family: var(--mono);
+            font-size: 12px; padding: 7px 0; border-top: 1px solid var(--line);
+            border-bottom: 1px solid var(--line); margin: 7px 0; }
+
+  button { font: inherit; font-size: 13px; background: var(--bg); color: var(--fg);
+           border: 1px solid var(--line); border-radius: 7px; padding: 7px 13px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button[disabled] { opacity: .45; cursor: not-allowed; }
+  button.danger { color: var(--ask); }
+  button.primary { border-color: var(--accent); color: var(--accent); }
+  select, input[type=range] { font: inherit; font-size: 13px; background: var(--bg);
+           color: var(--fg); border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; }
+  label { display: block; font-size: 12px; color: var(--dim); margin: 12px 0 4px; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+  .tape { font-family: var(--mono); font-size: 12px; max-height: 268px; overflow-y: auto; }
+  .tape div { display: flex; justify-content: space-between; padding: 2px 0;
+              border-bottom: 1px solid var(--line); }
+  .tape .b { color: var(--bid); } .tape .s { color: var(--ask); }
+
+  .note { font-size: 13px; color: var(--dim); border-left: 3px solid var(--warn);
+          padding: 2px 0 2px 13px; margin: 20px 0; }
+  .note strong { color: var(--fg); }
+  code { font-family: var(--mono); font-size: .9em; }
+  footer { margin-top: 36px; color: var(--dim); font-size: 13px;
+           border-top: 1px solid var(--line); padding-top: 18px; }
+  #build { font-family: var(--mono); font-size: 11px; color: var(--dim);
+           white-space: pre; margin-top: 10px; }
+  .badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 20px;
+           border: 1px solid var(--line); color: var(--dim); }
+  .badge.on { color: var(--ask); border-color: var(--ask); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>exchange-core</h1>
+  <p class="sub">
+    A C++20 price-time-priority matching engine, compiled to WebAssembly and
+    matching orders in your browser. Not a model of the engine — this
+    <em>is</em> <code>xc_core</code>: the same order book, risk checks and kill
+    switch that the native binaries and the 374-test suite run against.
+    <a href="https://github.com/alphasafal/exchange-core">Source</a>.
+  </p>
+
+  <div class="row">
+    <div class="panel"><div class="statlabel">Commands matched</div><div class="stat" id="s-commands">—</div></div>
+    <div class="panel"><div class="statlabel">Resting orders</div><div class="stat" id="s-resting">—</div></div>
+    <div class="panel"><div class="statlabel">Trades printed</div><div class="stat" id="s-trades">—</div></div>
+    <div class="panel"><div class="statlabel">ns / command <span title="In this browser, through WebAssembly. Not the native figure.">·wasm</span></div><div class="stat" id="s-ns">—</div></div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>Order book — DEMO</h2>
+      <table>
+        <thead><tr><th>Price</th><th>Quantity</th><th>Orders</th></tr></thead>
+        <tbody id="asks"></tbody>
+      </table>
+      <div class="spread" id="spread">—</div>
+      <table>
+        <tbody id="bids"></tbody>
+      </table>
+    </div>
+
+    <div>
+      <div class="panel" style="margin-bottom:16px">
+        <h2>Controls</h2>
+        <div class="controls">
+          <button id="run" class="primary">Pause</button>
+          <button id="burst">Send 50k</button>
+          <button id="reset">Reset</button>
+          <button id="halt" class="danger">Trip kill switch</button>
+          <span class="badge" id="haltbadge">trading</span>
+        </div>
+
+        <label for="policy">Self-trade prevention</label>
+        <select id="policy">
+          <option value="0">Allow</option>
+          <option value="1" selected>Cancel incoming</option>
+          <option value="2">Cancel resting</option>
+          <option value="3">Cancel both</option>
+          <option value="4">Decrement both</option>
+        </select>
+
+        <label for="maxqty">Max order quantity — <span id="maxqtyv">500</span> lots</label>
+        <input type="range" id="maxqty" min="5" max="500" value="500" style="width:100%">
+
+        <label for="collar">Price collar — <span id="collarv">off</span></label>
+        <input type="range" id="collar" min="0" max="500" value="0" step="10" style="width:100%">
+
+        <div style="margin-top:12px;font-size:12px;color:var(--dim)">
+          Rejected: <span id="s-rejects">0</span>
+          <span id="s-lastreject"></span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Trade tape</h2>
+        <div class="tape" id="tape"></div>
+      </div>
+    </div>
+  </div>
+
+  <p class="note">
+    <strong>The nanoseconds-per-command figure above is a browser number, and
+    browsers cannot measure this.</strong>
+    <code>performance.now()</code> is deliberately coarsened to defeat timing
+    side channels — typically 100&nbsp;µs to 1&nbsp;ms — against operations that
+    take tens of nanoseconds. So this page times a whole batch between two clock
+    reads and divides, which the resolution does support, and does not show
+    per-operation percentiles at all, because it genuinely cannot measure them.
+    WebAssembly also runs several times slower than native here.
+    The native p50/p99/p99.9, measured with a timer that resolves 41.67&nbsp;ns
+    and reported with the CPU, OS, compiler and flags that produced them, are in
+    <a href="https://github.com/alphasafal/exchange-core/blob/main/docs/benchmarks.md">docs/benchmarks.md</a>.
+  </p>
+
+  <footer>
+    <strong>What you are looking at.</strong> Synthetic order flow — a narrow
+    price band and three accounts, so orders actually collide — driven through
+    the real engine. Changing the self-trade policy or the risk limits changes
+    the behaviour of the same code paths the test suite exercises; trip the kill
+    switch and new orders are refused while cancellation keeps working, which is
+    the asymmetry explained in
+    <a href="https://github.com/alphasafal/exchange-core/blob/main/docs/risk.md">docs/risk.md</a>.
+    <div id="build">loading…</div>
+  </footer>
+</div>
+
+<script src="exchange_core.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

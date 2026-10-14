@@ -12,3 +12,8 @@ perf.data*
 crash-*
 leak-*
 timeout-*
+
+# Built by web/build.sh and by the demo workflow. Not committed: a checked-in
+# binary drifts from the source that produced it, and this demo's only claim is
+# that it is the real engine.
+web/dist/

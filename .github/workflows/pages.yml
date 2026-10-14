@@ -1,0 +1,60 @@
+name: demo
+
+# Builds the browser demo from source and publishes it to GitHub Pages.
+#
+# The WebAssembly is built here rather than committed. A checked-in binary
+# drifts from the source that produced it, and the one thing this demo claims
+# is that it runs the real engine -- which is only true if it is compiled from
+# the same tree on every push.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'src/**'
+      - 'include/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never cancel a half-finished deployment: the live page would be left serving
+# whichever files happened to have uploaded.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.64
+          actions-cache-folder: emsdk-cache
+
+      - name: Build the demo
+        run: ./web/build.sh "${GITHUB_WORKSPACE}/web/dist"
+
+      - name: Report what was built
+        run: ls -la web/dist && du -h web/dist/exchange_core.wasm
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
