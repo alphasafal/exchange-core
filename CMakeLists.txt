@@ -24,6 +24,7 @@ option(XC_BUILD_BENCH  "Build the benchmark harnesses"                 ON)
 # a cache STRING or "none" silently becomes OFF and reaches the compiler as
 # -fsanitize=OFF.
 option(XC_BUILD_FUZZERS "Build the libFuzzer targets (Clang only)" OFF)
+option(XC_LTO "Link-time optimisation for release builds" OFF)
 
 set(XC_SANITIZER "none" CACHE STRING "Sanitizer to enable: none|address|thread|undefined")
 set_property(CACHE XC_SANITIZER PROPERTY STRINGS none address thread undefined)
@@ -63,6 +64,24 @@ if(XC_NATIVE_ARCH AND NOT MSVC)
         if(XC_HAS_MCPU_NATIVE)
             target_compile_options(xc_flags INTERFACE -mcpu=native)
         endif()
+    endif()
+endif()
+
+# Link-time optimisation.
+#
+# The matching path crosses translation units constantly -- order_book.cpp calls
+# into price_level.cpp and order_pool.cpp on every command -- and without LTO
+# none of that can inline. Off by default because it roughly triples link time
+# and makes a profile harder to read; on in the preset used for benchmarks,
+# where the question is how fast the code can go rather than how fast it builds.
+if(XC_LTO)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT xc_ipo_ok OUTPUT xc_ipo_why)
+    if(xc_ipo_ok)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+        message(STATUS "Link-time optimisation: enabled")
+    else()
+        message(WARNING "XC_LTO requested but unsupported here: ${xc_ipo_why}")
     endif()
 endif()
 
