@@ -1,6 +1,21 @@
 # exchange-core
 
 [![ci](https://github.com/alphasafal/exchange-core/actions/workflows/ci.yml/badge.svg)](https://github.com/alphasafal/exchange-core/actions/workflows/ci.yml)
+[![demo](https://github.com/alphasafal/exchange-core/actions/workflows/pages.yml/badge.svg)](https://alphasafal.github.io/exchange-core/)
+[![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white)](CMakeLists.txt)
+[![licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
+[![tests](https://img.shields.io/badge/tests-374-success)](tests/)
+
+### ▸ [Watch it match orders in your browser](https://alphasafal.github.io/exchange-core/)
+
+[![The live order book demo](docs/img/demo.jpg)](https://alphasafal.github.io/exchange-core/)
+
+The engine compiled to WebAssembly: the same order book, risk checks and kill
+switch this repository tests, matching live on a page. Trip the kill switch and
+watch the book drain to zero — new orders are refused while cancellation keeps
+working, which is the asymmetry [docs/risk.md](docs/risk.md) explains.
+
+---
 
 A single-node exchange core in C++20: price-time-priority limit order book,
 matching engine, pre-trade risk and kill switch, write-ahead journal with
@@ -35,6 +50,9 @@ For the whole thing end to end — venue started, orders matched, the process
 killed with `SIGKILL`, journal replayed, state digest verified — run
 [`scripts/demo.sh`](scripts/demo.sh). It asserts rather than narrates, and exits
 non-zero if anything it claims fails.
+
+For the browser demo, [`web/build.sh`](web/build.sh) needs Emscripten; see
+[web/README.md](web/README.md).
 
 ## Architecture
 
@@ -96,6 +114,11 @@ regenerate with `./scripts/run_bench.sh`. Apple M2, macOS 26.2, AppleClang 17,
 | Allocations on the matching path | **0** |
 | Loopback round trip, order to ack | **~16–20 µs**, of which matching is ~75 ns |
 
+Cost is not flat in the depth of the book: it rises about **5 ns per doubling**
+of the price-level count, which is the red-black tree inside `std::map`.
+[docs/benchmarks.md](docs/benchmarks.md) measures that curve, names the flat
+price ladder that would remove it, and says why that has not been built yet.
+
 Three caveats that belong beside those numbers rather than in a footnote.
 
 **`steady_clock` on this machine resolves 41.67 ns.** Every individually timed
@@ -136,6 +159,9 @@ be read as one.** This is a laptop, the wire numbers are loopback, and
 | [failure-modes.md](docs/failure-modes.md) | what breaks, how it is detected, which test proves it |
 | [benchmarks.md](docs/benchmarks.md) | measured numbers with the environment that produced them |
 | [demo.md](docs/demo.md) | the demo storyboard, and how to record it |
+| [web/README.md](web/README.md) | the browser demo, and what it cannot measure |
+| [CHANGELOG.md](CHANGELOG.md) | what changed, and the defects found along the way |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | the bar a change has to clear |
 
 ## Status
 
