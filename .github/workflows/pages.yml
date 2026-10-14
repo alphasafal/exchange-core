@@ -53,7 +53,7 @@ jobs:
       - name: Report what was built
         run: ls -la web/dist && du -h web/dist/exchange_core.wasm
 
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web/dist
