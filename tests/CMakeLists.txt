@@ -31,6 +31,7 @@ add_executable(xc_tests
     test_build_info.cpp
     test_types.cpp
     test_order_storage.cpp
+    test_price_ladder.cpp
     test_order_book.cpp
     test_self_trade_and_post_only.cpp
     test_replace.cpp
