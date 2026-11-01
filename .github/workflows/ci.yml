@@ -15,7 +15,7 @@ jobs:
     name: clang-format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install pinned clang-format
         run: pip install clang-format==17.0.6
       - name: Check formatting
@@ -55,7 +55,7 @@ jobs:
             cxx: clang++
             apt: ""
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install compiler
         if: matrix.toolchain.apt != ''
@@ -94,7 +94,7 @@ jobs:
       matrix:
         preset: [asan, ubsan]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install compiler
         run: |
@@ -138,7 +138,7 @@ jobs:
     name: tsan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install compiler
         run: |
@@ -177,7 +177,7 @@ jobs:
     name: fuzz
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install compiler
         run: |
@@ -227,7 +227,7 @@ jobs:
     name: clang-tidy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install clang-tidy
         run: |
