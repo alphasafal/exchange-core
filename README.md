@@ -85,7 +85,9 @@ the gap shrinks to 239 ns vs 167 ns per command.
   measures. At 20,000 orders/s that hid most of the tail: p99.9 of 873 µs
   closed-loop against 4.52 ms open-loop.
 
-Stage-by-stage detail is in [docs/architecture.md](docs/architecture.md).
+The first two bullets are written up as decision records, with the options I
+rejected and what would change my mind: [docs/adr](docs/adr/). Stage-by-stage detail is
+in [docs/architecture.md](docs/architecture.md).
 
 ![The command path from socket to fill](docs/architecture.svg)
 
@@ -136,6 +138,7 @@ says anything about a production venue. The full list is in
 ## Docs
 
 [architecture](docs/architecture.md) ·
+[decision records](docs/adr/) ·
 [benchmarks](docs/benchmarks.md) ·
 [comparison](docs/comparison.md) ·
 [protocol](docs/protocol.md) ·

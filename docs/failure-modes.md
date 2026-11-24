@@ -251,6 +251,11 @@ marketing.
 - **The process being killed between journal write and match.** Correct by
   construction — replay re-executes the command — but there is no test that
   kills a process at that exact point.
+- **A command journaled but never acknowledged.** If the process dies between
+  the journal write and the ack, recovery restores the order but the client
+  never heard about it, and may resend it or assume it failed. Venues solve this
+  with idempotent client order ids and an order-status query on reconnect;
+  neither exists here. See [ADR 0002](adr/0002-journal-before-matching.md#open-question).
 - **Memory exhaustion.** `std::bad_alloc` escapes to `main`, which now reports
   it and exits 1. Nothing attempts to continue.
 - **Byzantine or malicious clients beyond malformed bytes.** There is no
