@@ -1,183 +1,149 @@
 # exchange-core
 
 [![ci](https://github.com/alphasafal/exchange-core/actions/workflows/ci.yml/badge.svg)](https://github.com/alphasafal/exchange-core/actions/workflows/ci.yml)
+[![bench](https://github.com/alphasafal/exchange-core/actions/workflows/bench.yml/badge.svg)](https://github.com/alphasafal/exchange-core/actions/workflows/bench.yml)
 [![demo](https://github.com/alphasafal/exchange-core/actions/workflows/pages.yml/badge.svg)](https://alphasafal.github.io/exchange-core/)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white)](CMakeLists.txt)
 [![licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
-[![tests](https://img.shields.io/badge/tests-383-success)](tests/)
 
-### ▸ [Watch it match orders in your browser](https://alphasafal.github.io/exchange-core/)
+A single-node exchange core in C++20: a price-time-priority order book,
+pre-trade risk with a kill switch, a write-ahead journal with deterministic
+replay, a binary wire protocol, and a TCP/UDP venue simulator.
+
+I built it to learn how a matching engine behaves at the edges: under
+adversarial input, after a crash, and in the tail. My rule for the repository is
+that every number in it can be regenerated with one command.
+
+**[Try it in your browser](https://alphasafal.github.io/exchange-core/)**: the
+same engine compiled to WebAssembly. Trip the kill switch and new orders are
+refused while cancels still work ([why](docs/risk.md)).
 
 [![The live order book demo](docs/img/demo.jpg)](https://alphasafal.github.io/exchange-core/)
 
-The engine compiled to WebAssembly: the same order book, risk checks and kill
-switch this repository tests, matching live on a page. Trip the kill switch and
-watch the book drain to zero — new orders are refused while cancellation keeps
-working, which is the asymmetry [docs/risk.md](docs/risk.md) explains.
+## Numbers
 
----
+In-process matching, one thread, no journal. Apple M2, AppleClang 17,
+`-O3 -march=native`. Method and caveats are in
+[docs/benchmarks.md](docs/benchmarks.md).
 
-A single-node exchange core in C++20: price-time-priority limit order book,
-matching engine, pre-trade risk and kill switch, write-ahead journal with
-deterministic replay, a binary wire protocol, and a TCP/UDP exchange simulator.
+| | |
+|---|---|
+| Throughput | **13.3 M commands/s**, 75 ns per command |
+| Submit latency | p50 83 ns · p99 167 ns · p99.9 333 ns |
+| Cancel latency, mixed workload ¹ | p50 42 ns · p99 334 ns · p99.9 916 ns |
+| Allocations on the matching path | **0**, enforced by a test |
+| Cost vs book depth | 106 ns at 10 price levels, 111 ns at 5,000 |
+| Loopback round trip, order to ack | ~16–20 µs, of which matching is ~75 ns |
 
-The engineering goal is not feature count. It is that every claim in this
-repository can be reproduced by a stranger with one command, and that the
-things which are hard to get right — correctness under adversarial input, crash
-recovery, tail latency — are demonstrated rather than asserted.
+¹ Two thirds of these cancels target orders that were already filled, so this
+row mostly measures rejection. I found this while building the comparison
+below. `--live-cancels` measures removal only; see the
+[correction](docs/comparison.md#a-correction-to-the-original-benchmark).
 
-## Build
+The timer on that machine ticks every 41.67 ns, so p50 = 83 ns means two ticks,
+not nanosecond precision. That's why throughput is measured in a separate pass
+with no clock reads.
 
-Requires CMake 3.22+ and a C++20 compiler. Dependencies are fetched by CMake.
+### Against Liquibook
 
-```bash
-cmake --preset release
-cmake --build --preset release -j
-ctest --preset release
-```
+The same workload through [Liquibook](https://github.com/enewhuis/liquibook),
+an open-source C++ order book, back to back on a cloud VM (Xeon 2.1 GHz,
+GCC 13). Median of three runs, live cancels only. Full write-up:
+[docs/comparison.md](docs/comparison.md).
 
-383 tests. Presets: `release` (portable `-O2`), `native` (tuned to the building
-machine, used for benchmarks), `debug`, `asan`, `ubsan`, `tsan` and `fuzz`.
+| | exchange-core | Liquibook |
+|---|---|---|
+| Cost per command | **165 ns** | 8,034 ns |
+| Submit p50 / p99 | 153 / 397 ns | **137** / 433 ns |
+| Cancel p50 / p99 | **123 / 286 ns** | 273 / 95,359 ns |
 
-To see exactly what a build was produced with — compiler, version, flags, build
-type, whether assertions are on, which sanitizer:
+Submits are a draw. Liquibook is about 10% faster at the median, but it skips
+the instrument checks I do (tick, lot, price band, self-trade). Cancels are the
+real difference. Liquibook finds an order by walking every order at its price,
+so with ~12,000 orders per level its p99 cancel is 95 µs. Mine is an index
+lookup, and the cost stays flat. On a book spread thinly across 5,000 prices
+the gap shrinks to 239 ns vs 167 ns per command.
 
-```bash
-./build/release/apps/xc_info
-```
+## Design decisions
 
-For the whole thing end to end — venue started, orders matched, the process
-killed with `SIGKILL`, journal replayed, state digest verified — run
-[`scripts/demo.sh`](scripts/demo.sh). It asserts rather than narrates, and exits
-non-zero if anything it claims fails.
+- **Sequence after validation, journal before matching.** A command gets its
+  sequence number only after every check that could reject it, and it is
+  journaled before it touches the book. So the journal has no gaps, and a
+  missing number always means lost data.
+- **Flat price ladder instead of `std::map`.** Levels are an array indexed by
+  tick, with a bitmap of occupied levels, so finding the best price takes three
+  `countr_zero` instructions. This made cost independent of book depth (the
+  map rose 27% from 10 to 5,000 levels). The price is a fixed price band per
+  instrument ([limitations](docs/limitations.md)).
+- **Slab allocation and an intrusive order index.** The first version allocated
+  once per order. It went 50,002 → 23,780 → 26 → 0 allocations per 50k orders,
+  and a test now fails if one comes back.
+- **Durability is honest.** `F_FULLFSYNC` per command costs 2.5 ms (400/s), vs
+  264 ns buffered. Plain `fsync` returns sooner but does not survive a
+  power cut, so the journal doesn't use it.
+- **Open-loop load generation.** A closed-loop harness stalls with the system it
+  measures. At 20,000 orders/s that hid most of the tail: p99.9 of 873 µs
+  closed-loop against 4.52 ms open-loop.
 
-For the browser demo, [`web/build.sh`](web/build.sh) needs Emscripten; see
-[web/README.md](web/README.md).
-
-## Architecture
+Stage-by-stage detail is in [docs/architecture.md](docs/architecture.md).
 
 ![The command path from socket to fill](docs/architecture.svg)
 
-The order of those stages is the design. A command is given its sequence number
-**after** every gate that could reject it without touching the book and
-**before** it is journaled, so journal sequence numbers have no holes in them —
-which is what lets a gap mean data loss rather than ambiguity. The journal is
-written **before** matching, because a record written afterwards can be lost for
-an event the world has already seen.
+## How I know it's correct
 
-[docs/architecture.md](docs/architecture.md) covers the path stage by stage, the
-data structures and why each was chosen, and the threading model.
+- **Reference model:** a naive O(N²) matcher in `tests/model/` is diffed
+  against the real book on random order flow. It found three bugs.
+- **Invariants:** the book never crosses, quantity is conserved, and level
+  totals match their orders.
+- **Fuzzing:** three libFuzzer targets cover the wire decoder, order flow
+  against the model, and journal recovery from corrupted segments. Their
+  corpora also run as normal tests.
+- **Deterministic replay:** replaying the journal reproduces a bit-identical
+  state digest, checked by a test.
+- **CI on every commit, 12 jobs:**
+  - GCC 13 and Clang 18 on Linux, plus Apple Clang
+  - each in Release and Debug
+  - ASan, UBSan and TSan
+  - clang-tidy as errors (it caught a journal filename parser that wrapped an
+    index to zero)
+  - a fuzz smoke run
 
-## How correctness is established
+  A separate [bench job](.github/workflows/bench.yml) publishes both engines'
+  numbers on every push to main.
 
-- **A reference model.** A deliberately naive O(N²) matcher in `tests/model/`
-  serves as an executable specification. The optimised book is diffed against it
-  on randomised order flow; any divergence is a bug in one of them. Three of
-  this project's defects were found that way, each fixed in the commit that
-  found it.
-- **Property-based invariants.** The book may never cross, quantity is conserved
-  across every fill, and level totals must equal the sum of their resting
-  orders.
-- **Fuzzing.** Three libFuzzer targets in `fuzz/`: the wire decoder on arbitrary
-  bytes, order flow diffed against that same reference model, and journal
-  recovery over corrupted segments. Their oracles also run as ordinary tests
-  over a committed corpus, on both compilers and under the sanitizers — so a
-  crash found by a long campaign becomes a regression test by committing one
-  file. CI runs 60 s per target, which is a regression gate and not a coverage
-  claim.
-- **Sanitizers.** AddressSanitizer and UndefinedBehaviorSanitizer over the whole
-  suite in CI. ThreadSanitizer has exactly one thing here to look at: the engine
-  and the transport are both single-threaded by design, and the only concurrent
-  code in the repository is the open-loop benchmark harness, which is what TSan
-  checks.
-- **clang-tidy**, enforced as errors. It found a journal segment-name parser
-  that accepted any filename beginning with `segment-` and digits, so a stray
-  `.bak` failed recovery on a healthy journal and `segment--1.xcj` parsed as
-  4294967295 and wrapped the writer's next index to zero.
-- **Deterministic replay.** Replaying the journal reproduces a bit-identical
-  engine state digest. Asserted by a test, not by prose.
-- **CI on every commit**: clang-format, GCC 13 and Clang 18 on Linux and Apple
-  Clang on macOS, each in Release and Debug, plus ASan, UBSan, TSan, clang-tidy
-  and the fuzz smoke run — twelve jobs.
+383 tests in total.
 
-## Measured results
+## Build
 
-Environment, method and caveats in [docs/benchmarks.md](docs/benchmarks.md);
-regenerate with `./scripts/run_bench.sh`. Apple M2, macOS 26.2, AppleClang 17,
-`-O3 -march=native`.
+CMake 3.22+ and a C++20 compiler. Dependencies are fetched by CMake.
 
-| | |
-|---|---|
-| Matching throughput, in process | **13.3 M commands/s** (75 ns per command) |
-| `submit` latency | p50 **83 ns**, p99 **167 ns**, p99.9 **333 ns** |
-| `cancel` latency | p50 **42 ns**, p99 **334 ns**, p99.9 **916 ns** |
-| Allocations on the matching path | **0** |
-| Loopback round trip, order to ack | **~16–20 µs**, of which matching is ~75 ns |
+```bash
+cmake --preset release && cmake --build --preset release -j && ctest --preset release
+./scripts/run_bench.sh          # benchmarks with the environment that produced them
+./scripts/demo.sh               # start venue, trade, SIGKILL it, replay, verify digest
+```
 
-**Cost is flat in the depth of the book** — 106 ns at 10 price levels, 111 ns at
-5,000. Price levels live in a flat ladder indexed by tick with a bitmap over the
-occupied ones, so finding a level is an array index and finding the *best* level
-is three `countr_zero` instructions. The `std::map` it replaced rose 27% across
-that range. What it costs is a bounded price band per instrument;
-[docs/benchmarks.md](docs/benchmarks.md) has the before and after, and
-[docs/limitations.md](docs/limitations.md) has the constraint.
+Other presets: `native` (benchmarks), `debug`, `asan`, `ubsan`, `tsan`, `fuzz`.
+For the Liquibook comparison, add `-DXC_BENCH_LIQUIBOOK=ON`.
 
-Three caveats that belong beside those numbers rather than in a footnote.
+## What it isn't
 
-**`steady_clock` on this machine resolves 41.67 ns.** Every individually timed
-latency is a multiple of one tick, so a p50 of 83 ns means *two ticks* and not a
-nanosecond-accurate measurement. The clock's cost is included and never
-subtracted. Throughput is measured in a separate pass with no clock read in the
-loop, which is why it is the more trustworthy figure for average cost.
+One node, one matching thread. No authentication, margin, FIX or multi-node
+replication. Every number above is from a laptop or a shared VM, so none of them
+says anything about a production venue. The full list is in
+[docs/limitations.md](docs/limitations.md).
 
-**The zero-allocation claim was false when first measured** — roughly one
-allocation per order. `std::unordered_map` allocates a node per insert, so the
-order index allocated on every resting order. 50,002 → 23,780 → 26 → 0, with
-what fixed each step recorded in the benchmarks document.
+## Docs
 
-**Durability costs what it costs.** `F_FULLFSYNC` on every command is 2.5 ms
-(400/s) against 264 ns buffered. Plain `fsync` returns sooner and does not
-actually survive a power cut, so using it would have made this number look much
-better and the guarantee false.
+[architecture](docs/architecture.md) ·
+[benchmarks](docs/benchmarks.md) ·
+[comparison](docs/comparison.md) ·
+[protocol](docs/protocol.md) ·
+[determinism](docs/determinism.md) ·
+[risk](docs/risk.md) ·
+[failure modes](docs/failure-modes.md) ·
+[limitations](docs/limitations.md) ·
+[changelog](CHANGELOG.md) ·
+[contributing](CONTRIBUTING.md)
 
-Latency is reported as p50/p90/p99/p99.9/p99.99/max from a log-linear histogram,
-never as a bare average. Load is generated open-loop against intended send
-times, because a closed-loop harness stalls with the system it is measuring and
-never samples the stall — at 20,000 orders/s that understates p99.9 by **5.2×**
-(873 µs against 4.52 ms).
-
-**There is no comparison to any real venue here and none of these figures should
-be read as one.** This is a laptop, the wire numbers are loopback, and
-[docs/limitations.md](docs/limitations.md) covers what else is not true of it.
-
-## Documentation
-
-| | |
-|---|---|
-| [limitations.md](docs/limitations.md) | what this is not, and why the numbers are not comparable to production |
-| [architecture.md](docs/architecture.md) | the command path, the data structures, the threading model |
-| [protocol.md](docs/protocol.md) | the wire format, byte for byte |
-| [determinism.md](docs/determinism.md) | what replay guarantees, and what it does not |
-| [risk.md](docs/risk.md) | pre-trade limits, collars, rate limiting, kill switch |
-| [failure-modes.md](docs/failure-modes.md) | what breaks, how it is detected, which test proves it |
-| [benchmarks.md](docs/benchmarks.md) | measured numbers with the environment that produced them |
-| [demo.md](docs/demo.md) | the demo storyboard, and how to record it |
-| [web/README.md](web/README.md) | the browser demo, and what it cannot measure |
-| [CHANGELOG.md](CHANGELOG.md) | what changed, and the defects found along the way |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | the bar a change has to clear |
-
-## Status
-
-Feature-complete for what it sets out to be, and documented to match. The
-components landed in dependency order — order book, matching engine, risk,
-journal, protocol, network, measurement, hardening — and every commit builds and
-passes CI on both compilers, both platforms and both build types.
-
-What is deliberately absent is in [limitations.md](docs/limitations.md): no
-authentication, no multi-node anything, no margin, no FIX. And no recorded
-demo — [docs/demo.md](docs/demo.md) is the storyboard and `scripts/demo.sh`
-produces the recording, but this repository does not contain one.
-
-## Licence
-
-MIT — see [LICENSE](LICENSE).
+MIT licence.
