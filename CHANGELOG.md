@@ -8,6 +8,24 @@ defect this project actually had, not a category it might have had.
 
 ## [Unreleased]
 
+### Benchmarks
+
+- Head-to-head comparison with Liquibook on identical input
+  (`docs/comparison.md`, opt-in `-DXC_BENCH_LIQUIBOOK=ON`, pinned commit).
+  Submits are roughly equal: Liquibook is about 10% faster at the median and
+  does no instrument validation. Cancels are not: Liquibook's p99 is about
+  330× exchange-core's at 40 levels, because it scans the price level instead
+  of indexing orders.
+- Defect: `bench_matching` chose cancel victims from every id that had ever
+  rested, so 66% of timed cancels named filled orders and were rejected. The
+  published cancel latency mostly measured the rejection path. Added
+  `--live-cancels`; the default is unchanged so earlier figures stay
+  comparable, and `docs/benchmarks.md` now carries a correction.
+- `bench` workflow: runs both engines on every push to main, publishes the
+  results to the job summary, and fails a run that was invalid (slab growth or
+  rejected live cancels). It does not gate on latency, because shared runners
+  are too noisy for that.
+
 ## [0.1.0] — 2026-10-14
 
 First tagged release. Everything in it builds and passes twelve CI jobs on GCC

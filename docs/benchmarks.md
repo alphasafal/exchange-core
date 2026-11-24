@@ -66,6 +66,11 @@ commands of warm-up before anything is measured.
 | Throughput | **13.3 M commands/s** |
 | Cost per command | **75.1 ns** |
 
+> **Correction (2026-11-24).** About two thirds of the cancels in this workload
+> name orders that had already been filled, so the cancel row below mostly
+> measures rejection, not removal. Run with `--live-cancels` to time only the
+> removal of resting orders. See [comparison.md](comparison.md#a-correction-to-the-original-benchmark).
+
 **Latency, timed individually** (includes ~42 ns of timer, not subtracted):
 
 | Operation | n | p50 | p90 | p99 | p99.9 | p99.99 | max |

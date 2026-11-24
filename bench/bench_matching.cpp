@@ -3,6 +3,7 @@
 //
 //   bench_matching [--orders N] [--warmup N] [--levels N] [--seed N]
 //                  [--journal DIR] [--durability none|interval|always]
+//                  [--live-cancels]
 //
 // Runs the same workload twice, because one measurement cannot answer both
 // questions honestly.
@@ -74,6 +75,8 @@ void print_usage(const char* program) {
               << "  --seed N          random seed (default 1)\n"
               << "  --journal DIR     journal to DIR while measuring\n"
               << "  --durability P    none | interval | always (default none)\n"
+              << "  --live-cancels    cancel only orders still resting (default: any id\n"
+              << "                    that rested once, so many cancels are rejected)\n"
               << "  --help\n";
 }
 
@@ -88,6 +91,7 @@ int run(int argc, char** argv) {
     std::uint64_t seed = 1;
     std::string journal_directory;
     xc::journal::Durability durability = xc::journal::Durability::None;
+    bool live_cancels = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg = argv[i];
@@ -104,6 +108,8 @@ int run(int argc, char** argv) {
             levels = std::stoll(next());
         } else if (arg == "--seed") {
             seed = std::stoull(next());
+        } else if (arg == "--live-cancels") {
+            live_cancels = true;
         } else if (arg == "--journal") {
             journal_directory = next();
         } else if (arg == "--durability") {
@@ -187,6 +193,27 @@ int run(int argc, char** argv) {
     std::vector<std::uint64_t> resting_ids;
     resting_ids.reserve(order_count);
 
+    // An id stays in resting_ids after the order that owned it has been filled,
+    // so by default a large share of cancels name orders that no longer rest
+    // and are rejected. That is a legitimate workload -- cancels racing fills
+    // are common -- but it measures rejection, not removal. --live-cancels
+    // drops filled ids before choosing a victim, outside any timed region.
+    const xc::OrderBook* bench_book = engine.book(xc::InstrumentId{1});
+    std::uint64_t cancels_rejected = 0;
+    const auto pick_victim = [&]() -> std::size_t {
+        for (;;) {
+            const std::size_t victim = rng() % resting_ids.size();
+            if (!live_cancels || bench_book->find(xc::OrderId{resting_ids[victim]}) != nullptr) {
+                return victim;
+            }
+            resting_ids[victim] = resting_ids.back();
+            resting_ids.pop_back();
+            if (resting_ids.empty()) {
+                return resting_ids.size();
+            }
+        }
+    };
+
     // Pass one: throughput, with no clock read inside the loop at all.
     std::uint64_t untimed_commands = 0;
     const auto throughput_start = Clock::now();
@@ -196,12 +223,14 @@ int run(int argc, char** argv) {
         ++untimed_commands;
 
         if (!resting_ids.empty() && i % 4 == 3) {
-            const std::size_t victim = rng() % resting_ids.size();
-            engine.cancel(xc::CancelOrder{xc::OrderId{resting_ids[victim]}, xc::AccountId{1},
-                                          xc::InstrumentId{1}});
-            ++untimed_commands;
-            resting_ids[victim] = resting_ids.back();
-            resting_ids.pop_back();
+            const std::size_t victim = pick_victim();
+            if (victim < resting_ids.size()) {
+                engine.cancel(xc::CancelOrder{xc::OrderId{resting_ids[victim]}, xc::AccountId{1},
+                                              xc::InstrumentId{1}});
+                ++untimed_commands;
+                resting_ids[victim] = resting_ids.back();
+                resting_ids.pop_back();
+            }
         }
         if (engine.book(xc::InstrumentId{1})->find(xc::OrderId{id}) != nullptr) {
             resting_ids.push_back(id);
@@ -225,12 +254,18 @@ int run(int argc, char** argv) {
         // Cancel an older resting order every few commands, so the measurement
         // reflects a book that is being worked rather than one that only grows.
         if (!resting_ids.empty() && i % 4 == 3) {
-            const std::size_t victim = rng() % resting_ids.size();
+            const std::size_t victim = pick_victim();
+            if (victim == resting_ids.size()) {
+                continue;  // nothing left to cancel; the submit was already recorded
+            }
             const xc::CancelOrder cancel{xc::OrderId{resting_ids[victim]}, xc::AccountId{1},
                                          xc::InstrumentId{1}};
             const auto cancel_start = Clock::now();
-            engine.cancel(cancel);
+            const bool cancelled = engine.cancel(cancel).reject == xc::RejectReason::None;
             cancel_latency.record(nanos_since(cancel_start));
+            if (!cancelled) {
+                ++cancels_rejected;
+            }
             resting_ids[victim] = resting_ids.back();
             resting_ids.pop_back();
         }
@@ -267,7 +302,10 @@ int run(int argc, char** argv) {
               << '\n'
               << "  slab high water      " << book->pool().high_water_mark() << '\n'
               << "  slab growth events   " << book->pool().growth_events() << '\n'
-              << "  ladder levels/side   " << book->instrument().tick_count() << '\n';
+              << "  ladder levels/side   " << book->instrument().tick_count() << '\n'
+              << "  cancel mode          " << (live_cancels ? "live only" : "any rested id") << '\n'
+              << "  timed cancels rejected " << cancels_rejected << " of " << cancel_latency.count()
+              << '\n';
 
     if (journal) {
         std::cout << "\njournal\n"

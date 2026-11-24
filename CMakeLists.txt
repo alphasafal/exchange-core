@@ -25,6 +25,7 @@ option(XC_BUILD_BENCH  "Build the benchmark harnesses"                 ON)
 # -fsanitize=OFF.
 option(XC_BUILD_FUZZERS "Build the libFuzzer targets (Clang only)" OFF)
 option(XC_LTO "Link-time optimisation for release builds" OFF)
+option(XC_BENCH_LIQUIBOOK "Build the Liquibook comparison benchmark (fetches Liquibook)" OFF)
 
 set(XC_SANITIZER "none" CACHE STRING "Sanitizer to enable: none|address|thread|undefined")
 set_property(CACHE XC_SANITIZER PROPERTY STRINGS none address thread undefined)

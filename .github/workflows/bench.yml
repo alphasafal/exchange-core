@@ -1,0 +1,65 @@
+name: bench
+
+# Runs the benchmarks on every push to main and on demand, and publishes the
+# results to the job summary and as an artifact.
+#
+# It reports and does not gate on latency. Shared GitHub runners vary by tens
+# of percent between runs, so a threshold tight enough to catch a real
+# regression would fail on noise. It does fail on conditions that make a run
+# invalid rather than slow: the order slab growing during measurement, or a
+# live-cancel run issuing a cancel that was rejected.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure (Release, native, LTO, with Liquibook comparison)
+        run: >
+          cmake -S . -B build/bench -DCMAKE_BUILD_TYPE=Release
+          -DXC_NATIVE_ARCH=ON -DXC_LTO=ON -DXC_BENCH_LIQUIBOOK=ON
+          -DXC_BUILD_TESTS=OFF
+
+      - name: Build
+        run: cmake --build build/bench -j --target bench_matching bench_liquibook
+
+      - name: Run
+        run: |
+          set -euo pipefail
+          b=build/bench/bench
+          {
+            echo "## Benchmarks @ ${GITHUB_SHA::7}"
+            echo
+            echo "Shared GitHub runner: compare runs with care. Method and caveats: docs/benchmarks.md, docs/comparison.md."
+            echo
+            echo '### exchange-core, default workload'
+            echo '```'; $b/bench_matching --orders 1000000; echo '```'
+            echo '### exchange-core, --live-cancels'
+            echo '```'; $b/bench_matching --orders 1000000 --live-cancels; echo '```'
+            echo '### Liquibook, --live-cancels (same workload)'
+            echo '```'; $b/bench_liquibook --orders 1000000 --live-cancels; echo '```'
+          } | tee results.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check the runs were valid
+        run: |
+          set -euo pipefail
+          if grep -E 'slab growth events +[1-9]' results.md; then
+            echo "::error::the order slab grew during a measured run"; exit 1
+          fi
+          live=$(awk '/--live-cancels$/{f=1} f && /timed cancels rejected/{print $4; exit}' results.md)
+          if [ "${live:-x}" != "0" ]; then
+            echo "::error::live-cancel run rejected ${live} cancels"; exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ github.sha }}
+          path: results.md
