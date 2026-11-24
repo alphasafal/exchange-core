@@ -75,6 +75,13 @@ the gap shrinks to 239 ns vs 167 ns per command.
   `countr_zero` instructions. This made cost independent of book depth (the
   map rose 27% from 10 to 5,000 levels). The price is a fixed price band per
   instrument ([limitations](docs/limitations.md)).
+- **Resends can't execute twice.** If the venue crashes after journaling an
+  order but before acking it, the client will resend. Ids must increase per
+  account, so the resend is refused before it's numbered, even if the original
+  has already filled. The book keeps one id per account, not one per order, and
+  a death test kills the process at exactly that point. The first version cost
+  12% on every order with the check switched off; the record of how I found
+  and fixed that is in [ADR 0004](docs/adr/0004-increasing-order-ids.md).
 - **Slab allocation and an intrusive order index.** The first version allocated
   once per order. It went 50,002 → 23,780 → 26 → 0 allocations per 50k orders,
   and a test now fails if one comes back.
@@ -85,7 +92,7 @@ the gap shrinks to 239 ns vs 167 ns per command.
   measures. At 20,000 orders/s that hid most of the tail: p99.9 of 873 µs
   closed-loop against 4.52 ms open-loop.
 
-The first two bullets are written up as decision records, with the options I
+The first three bullets are written up as decision records, with the options I
 rejected and what would change my mind: [docs/adr](docs/adr/). Stage-by-stage detail is
 in [docs/architecture.md](docs/architecture.md).
 
@@ -113,7 +120,7 @@ in [docs/architecture.md](docs/architecture.md).
   A separate [bench job](.github/workflows/bench.yml) publishes both engines'
   numbers on every push to main.
 
-383 tests in total.
+398 tests in total.
 
 ## Build
 

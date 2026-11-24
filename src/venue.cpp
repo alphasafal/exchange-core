@@ -94,6 +94,10 @@ void Venue::handle(net::ConnectionId id, const protocol::Message& message) {
             instrument = message.replace_order.instrument;
             engine_.replace(message.replace_order);
             break;
+        case protocol::MessageType::OrderStatusRequest:
+            answer_status(message.status_request);
+            current_connection_ = 0;
+            return;
         default:
             // Session and market data messages are things the venue sends, not
             // things it accepts. A client sending one is either confused or
@@ -106,6 +110,26 @@ void Venue::handle(net::ConnectionId id, const protocol::Message& message) {
         publish_market_data(instrument);
     }
     current_connection_ = 0;
+}
+
+void Venue::answer_status(const protocol::OrderStatusRequest& request) {
+    // Answered from the book as it stands, outside the command sequence: a
+    // query changes nothing, so it is neither numbered nor journaled. The
+    // header carries the engine's last applied sequence so the client knows
+    // what point in the venue's history the answer describes.
+    protocol::OrderStatusReport report;
+    report.order = request.order;
+    report.account = request.account;
+    report.instrument = request.instrument;
+    if (const OrderBook* book = engine_.book(request.instrument); book != nullptr) {
+        const OrderStatus status = book->status(request.account, request.order);
+        report.state = status.state;
+        report.filled = status.filled;
+        report.remaining = status.remaining;
+    }
+    session_buffer_.clear();
+    protocol::encode_status(session_buffer_, engine_.sequence(), report);
+    send_session(session_buffer_);
 }
 
 void Venue::publish_market_data(InstrumentId instrument) {

@@ -35,6 +35,7 @@ add_executable(xc_tests
     test_order_book.cpp
     test_self_trade_and_post_only.cpp
     test_replace.cpp
+    test_resend.cpp
     test_depth.cpp
     test_differential.cpp
     test_invariants.cpp

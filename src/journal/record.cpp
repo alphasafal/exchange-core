@@ -29,6 +29,7 @@ void encode_payload(const Record& record, std::vector<std::uint8_t>& out) {
             writer.i64(instrument.max_price);
             writer.u8(instrument.display_exponent);
             writer.u8(static_cast<std::uint8_t>(instrument.self_trade_policy));
+            writer.boolean(instrument.increasing_order_ids);
             break;
         }
         case RecordType::NewOrder: {
@@ -83,6 +84,7 @@ bool decode_payload(RecordType type, std::span<const std::uint8_t> payload, Reco
             instrument.display_exponent = reader.u8();
             instrument.self_trade_policy = reader.enumeration<SelfTradePolicy>(
                 static_cast<std::uint8_t>(SelfTradePolicy::DecrementBoth));
+            instrument.increasing_order_ids = reader.boolean();
             break;
         }
         case RecordType::NewOrder: {

@@ -139,6 +139,19 @@ SubmitOutcome MatchingEngine::submit(const NewOrder& command) {
         return outcome;
     }
 
+    // A resend is refused before it is numbered, like every other refusal
+    // that never touches the book. It changed nothing, so it needs no journal
+    // record -- and a client resending a backlog after a reconnect does not
+    // grow the journal by one record per resend. See docs/adr/0004.
+    const bool increasing_ids = target->instrument().increasing_order_ids;
+    if (increasing_ids && target->is_resend(command.account, command.id)) {
+        outcome.reject = RejectReason::DuplicateOrderId;
+        for (EngineListener* listener : listeners_) {
+            listener->on_order_rejected(outcome.sequence, command, outcome.reject);
+        }
+        return outcome;
+    }
+
     const Nanos now = clock_.now();
 
     // A halt stops new orders and nothing else. Cancellation stays open, which
@@ -215,6 +228,11 @@ SubmitOutcome MatchingEngine::submit(const NewOrder& command) {
 
     if (kill_ != nullptr) {
         kill_->record_accept(command.account);
+    }
+    // Only once accepted: an order the book refused never executed, so
+    // sending it again is harmless and must stay possible.
+    if (increasing_ids) {
+        target->note_accepted(command.account, command.id);
     }
 
     settle_risk(command.instrument);

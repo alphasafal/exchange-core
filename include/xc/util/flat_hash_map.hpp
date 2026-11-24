@@ -104,6 +104,18 @@ class FlatHashMap {
         tombstones_ = 0;
     }
 
+    /// Calls `visit(key, value)` for every entry, in slot order. Slot order
+    /// depends on insertion history, so a caller that needs a stable order
+    /// (a digest, say) must not rely on it.
+    template<typename Visitor>
+    void for_each(Visitor&& visit) const {
+        for (std::size_t i = 0; i < capacity_; ++i) {
+            if (state_[i] == kOccupied) {
+                visit(keys_[i], values_[i]);
+            }
+        }
+    }
+
     std::size_t size() const noexcept { return occupied_; }
     bool empty() const noexcept { return occupied_ == 0; }
     std::size_t capacity() const noexcept { return capacity_; }

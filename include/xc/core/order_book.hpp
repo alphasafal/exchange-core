@@ -39,6 +39,28 @@ struct SubmitResult {
 };
 
 /// Outcome of cancelling an order.
+/// Where an order stands, as its owner is allowed to see it.
+enum class OrderState : std::uint8_t {
+    /// Never accepted for this account, or owned by another account. The two
+    /// are deliberately indistinguishable, for the reason cancel gives.
+    Unknown = 0,
+    /// Resting on the book now.
+    Working = 1,
+    /// Not resting, and at or below the highest id this account has had
+    /// accepted -- so it can never be accepted now. It may have filled, been
+    /// cancelled or expired, or been refused; the book keeps one id per account
+    /// rather than one record per order, so it cannot say which. The client's
+    /// executions say whether anything traded. Only reported on instruments
+    /// with increasing order ids.
+    NotWorking = 2,
+};
+
+struct OrderStatus {
+    OrderState state = OrderState::Unknown;
+    Quantity filled = 0;
+    Quantity remaining = 0;
+};
+
 struct CancelResult {
     RejectReason reject = RejectReason::None;
 
@@ -183,6 +205,35 @@ class OrderBook {
         }
     }
 
+    /// True when `id` is not above the highest id `account` has had accepted,
+    /// on an instrument with increasing order ids -- so it is a resend, or a
+    /// stale id, and must not execute. Checked by the engine before the order
+    /// is numbered, alongside the other gates that refuse without touching the
+    /// book.
+    ///
+    /// Not checked inside submit(). Adding a second path there, even one that
+    /// was never taken, made every submission ~12% slower on the matching
+    /// benchmark; submit() is the innermost call on the hot path and stays a
+    /// single straight line.
+    bool is_resend(AccountId account, OrderId id) const;
+
+    /// Raises `account`'s mark to `id` once the engine has seen the order
+    /// accepted. Never lowers it.
+    void note_accepted(AccountId account, OrderId id);
+
+    /// Answers "what happened to my order?" for a client that lost its
+    /// acknowledgement. Read-only and outside the command sequence: it changes
+    /// nothing, so it is neither numbered nor journaled.
+    OrderStatus status(AccountId account, OrderId id) const;
+
+    /// Visits (account, highest accepted order id) for every account that has
+    /// traded on an instrument with increasing order ids. Part of the book's
+    /// state, because it decides whether a future order is accepted.
+    template<typename Visitor>
+    void for_each_order_id_mark(Visitor&& visit) const {
+        highest_order_id_.for_each(visit);
+    }
+
     std::size_t resting_order_count() const noexcept { return index_.size(); }
     std::size_t bid_level_count() const noexcept { return bids_.size(); }
     std::size_t ask_level_count() const noexcept { return asks_.size(); }
@@ -250,6 +301,12 @@ class OrderBook {
     FlatHashMap<OrderId, OrderHandle> index_;
 
     std::uint64_t next_trade_id_ = 1;
+
+    /// Highest order id accepted from each account, when the instrument
+    /// requires increasing ids. One entry per account rather than one per
+    /// order, so a resent order is refused without the book remembering every
+    /// order it has ever finished.
+    FlatHashMap<AccountId, OrderId> highest_order_id_;
 };
 
 }  // namespace xc

@@ -287,6 +287,40 @@ SubmitResult OrderBook::submit(Order order, std::vector<Fill>& fills,
     return insert(order, fills, withdrawals);
 }
 
+bool OrderBook::is_resend(AccountId account, OrderId id) const {
+    const OrderId* highest = highest_order_id_.find(account);
+    return highest != nullptr && id <= *highest;
+}
+
+void OrderBook::note_accepted(AccountId account, OrderId id) {
+    if (OrderId* highest = highest_order_id_.find(account); highest != nullptr) {
+        if (id > *highest) {
+            *highest = id;
+        }
+        return;
+    }
+    highest_order_id_.insert(account, id);
+}
+
+OrderStatus OrderBook::status(AccountId account, OrderId id) const {
+    OrderStatus status;
+    if (const Order* order = find(id); order != nullptr) {
+        if (order->account == account) {
+            status.state = OrderState::Working;
+            status.filled = order->filled();
+            status.remaining = order->remaining;
+        }
+        return status;
+    }
+    if (instrument_.increasing_order_ids) {
+        const OrderId* highest = highest_order_id_.find(account);
+        if (highest != nullptr && id <= *highest) {
+            status.state = OrderState::NotWorking;
+        }
+    }
+    return status;
+}
+
 SubmitResult OrderBook::insert(Order order, std::vector<Fill>& fills,
                                std::vector<Withdrawal>* withdrawals) {
     SubmitResult result;

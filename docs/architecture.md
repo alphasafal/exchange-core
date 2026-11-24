@@ -57,7 +57,7 @@ command is given a number.
 |---|---|---|---|
 | 1 | frame and decode | connection closed | `protocol/messages.cpp` |
 | 2 | account pinning | connection closed | `net/tcp_gateway.cpp` |
-| 3 | instrument lookup | `UnknownInstrument`, `UnknownOrder` | `matching_engine.cpp` |
+| 3 | instrument lookup, resend check | `UnknownInstrument`, `UnknownOrder`, `DuplicateOrderId` ([ADR 0004](adr/0004-increasing-order-ids.md)) | `matching_engine.cpp` |
 | 4 | clock read | — | `core/clock.hpp` |
 | 5 | kill switch | `Halted` | `risk/kill_switch.cpp` |
 | 6 | pre-trade risk | `RiskLimit`, `PriceCollar`, `RateLimit` | `risk/risk_engine.cpp` |

@@ -78,6 +78,8 @@ bool is_known_type(std::uint8_t type) {
         case MessageType::NewOrder:
         case MessageType::CancelOrder:
         case MessageType::ReplaceOrder:
+        case MessageType::OrderStatusRequest:
+        case MessageType::OrderStatus:
         case MessageType::OrderAccepted:
         case MessageType::OrderRejected:
         case MessageType::OrderCancelled:
@@ -133,6 +135,29 @@ void encode_replace(std::vector<std::uint8_t>& out, SeqNum sequence, const Repla
     writer.u64(command.instrument.value());
     writer.i64(command.new_price);
     writer.u64(command.new_quantity);
+    end_frame(out, start);
+}
+
+void encode_status_request(std::vector<std::uint8_t>& out, SeqNum sequence,
+                           const OrderStatusRequest& request) {
+    const std::size_t start = begin_frame(out, MessageType::OrderStatusRequest, sequence);
+    ByteWriter writer(out);
+    writer.u64(request.order.value());
+    writer.u64(request.account.value());
+    writer.u64(request.instrument.value());
+    end_frame(out, start);
+}
+
+void encode_status(std::vector<std::uint8_t>& out, SeqNum sequence,
+                   const OrderStatusReport& status) {
+    const std::size_t start = begin_frame(out, MessageType::OrderStatus, sequence);
+    ByteWriter writer(out);
+    writer.u64(status.order.value());
+    writer.u64(status.account.value());
+    writer.u64(status.instrument.value());
+    writer.u8(static_cast<std::uint8_t>(status.state));
+    writer.u64(status.filled);
+    writer.u64(status.remaining);
     end_frame(out, start);
 }
 
@@ -279,6 +304,24 @@ DecodeResult decode(std::span<const std::uint8_t> data) {
             command.instrument = InstrumentId{reader.u64()};
             command.new_price = reader.i64();
             command.new_quantity = reader.u64();
+            break;
+        }
+        case MessageType::OrderStatusRequest: {
+            OrderStatusRequest& request = message.status_request;
+            request.order = OrderId{reader.u64()};
+            request.account = AccountId{reader.u64()};
+            request.instrument = InstrumentId{reader.u64()};
+            break;
+        }
+        case MessageType::OrderStatus: {
+            OrderStatusReport& status = message.status;
+            status.order = OrderId{reader.u64()};
+            status.account = AccountId{reader.u64()};
+            status.instrument = InstrumentId{reader.u64()};
+            status.state =
+                reader.enumeration<OrderState>(static_cast<std::uint8_t>(OrderState::NotWorking));
+            status.filled = reader.u64();
+            status.remaining = reader.u64();
             break;
         }
         case MessageType::OrderAccepted:

@@ -166,6 +166,9 @@ int run(int argc, char** argv) {
         instrument.lot_size = 1;
         instrument.min_quantity = 1;
         instrument.self_trade_policy = stp;
+        // A real venue's clients reconnect after failures and resend what they
+        // were not sure arrived. Increasing ids make that resend safe.
+        instrument.increasing_order_ids = true;
         config.instruments.push_back(instrument);
     }
 

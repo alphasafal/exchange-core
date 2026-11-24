@@ -37,6 +37,8 @@ bool is_known(xc::protocol::MessageType type) {
         case xc::protocol::MessageType::NewOrder:
         case xc::protocol::MessageType::CancelOrder:
         case xc::protocol::MessageType::ReplaceOrder:
+        case xc::protocol::MessageType::OrderStatusRequest:
+        case xc::protocol::MessageType::OrderStatus:
         case xc::protocol::MessageType::OrderAccepted:
         case xc::protocol::MessageType::OrderRejected:
         case xc::protocol::MessageType::OrderCancelled:

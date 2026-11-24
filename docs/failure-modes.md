@@ -106,6 +106,21 @@ a ninth digit and breaking the symmetry with the parser.
 
 → `SegmentName.RoundTripsEveryRepresentableIndex`
 
+### Killed after the journal write, before the acknowledgement
+
+The order is recovered by replay, but the client never heard about it and
+may send it again. On an instrument with increasing order ids the resend is
+refused as `DuplicateOrderId` before it is numbered, so it cannot execute twice
+even if the original has since filled. The client can send an
+`OrderStatusRequest` to learn whether the order is `Working`.
+
+**This was a real gap.** Without the rule, a resend of a filled order was
+accepted as a new order and traded again. See
+[ADR 0004](adr/0004-increasing-order-ids.md).
+
+→ `ResendDeathTest.CrashAfterJournalBeforeAckLeavesAResendSafeVenue`, which
+kills a child process at exactly that point, and the rest of `test_resend.cpp`
+
 ## Transport
 
 ### A client sends bytes that are not a message
@@ -249,13 +264,10 @@ marketing.
 - **Clock going backwards.** `steady_clock` is monotonic, so this is assumed
   away rather than defended against.
 - **The process being killed between journal write and match.** Correct by
-  construction — replay re-executes the command — but there is no test that
-  kills a process at that exact point.
-- **A command journaled but never acknowledged.** If the process dies between
-  the journal write and the ack, recovery restores the order but the client
-  never heard about it, and may resend it or assume it failed. Venues solve this
-  with idempotent client order ids and an order-status query on reconnect;
-  neither exists here. See [ADR 0002](adr/0002-journal-before-matching.md#open-question).
+  construction: the journal holds the same record whether the process died
+  before the match or after it, and replay re-executes it. The death test in
+  `test_resend.cpp` kills after the match, in the accept callback, but no test
+  kills at the earlier point.
 - **Memory exhaustion.** `std::bad_alloc` escapes to `main`, which now reports
   it and exits 1. Nothing attempts to continue.
 - **Byzantine or malicious clients beyond malformed bytes.** There is no

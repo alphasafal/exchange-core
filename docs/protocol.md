@@ -50,17 +50,19 @@ know closes the connection instead of guessing at the layout.
 | 1 | `NewOrder` | client → venue |
 | 2 | `CancelOrder` | client → venue |
 | 3 | `ReplaceOrder` | client → venue |
+| 4 | `OrderStatusRequest` | client → venue |
 | 16 | `OrderAccepted` | venue → the client that sent the command |
 | 17 | `OrderRejected` | venue → that client |
 | 18 | `OrderCancelled` | venue → that client |
 | 19 | `OrderReplaced` | venue → that client |
 | 20 | `Execution` | venue → that client |
+| 21 | `OrderStatus` | venue → that client |
 | 32 | `Trade` | venue → every subscriber |
 | 33 | `TopOfBook` | venue → every subscriber |
 | 34 | `DepthSnapshot` | venue → every subscriber |
 | 48 | `Heartbeat` | venue → every subscriber |
 
-The numbering is grouped rather than consecutive — 1–3 inbound, 16–20 session
+The numbering is grouped rather than consecutive — 1–4 inbound, 16–21 session
 replies, 32–34 market data, 48 session-level — so a new message in one group
 never has to be given a number that sorts it among another group's.
 
@@ -93,6 +95,40 @@ Field order is the order the bytes appear. `i64` is two's-complement signed.
 ### `ReplaceOrder` (3) — 40 bytes
 
 `u64 id`, `u64 account`, `u64 instrument`, `i64 new_price`, `u64 new_quantity`.
+
+### `OrderStatusRequest` (4) — 24 bytes
+
+`u64 order`, `u64 account`, `u64 instrument`.
+
+Read-only. It is not a command: it takes no sequence number, is not journaled,
+and changes nothing. A client sends it after reconnecting to find out what
+happened to an order whose acknowledgement it may have lost.
+
+### `OrderStatus` (21) — 41 bytes
+
+`u64 order`, `u64 account`, `u64 instrument`, `u8 state`, `u64 filled`,
+`u64 remaining`.
+
+The header's sequence number is the engine's last applied command, so the
+answer describes the venue as of that point.
+
+| `state` | meaning |
+|---|---|
+| 0 `Unknown` | never accepted for this account, or not this account's order (the two are indistinguishable on purpose) |
+| 1 `Working` | resting now; `filled` and `remaining` are current |
+| 2 `NotWorking` | not resting, and at or below the account's highest accepted id: filled, cancelled, expired or refused, so it can never be accepted now |
+
+`NotWorking` is only reported on instruments with increasing order ids.
+
+### Order ids must increase
+
+On an instrument with increasing order ids, which the venue simulator enables,
+each account's order ids must strictly increase. An order whose id is not
+above the highest id that account has had accepted is refused with
+`DuplicateOrderId` and never executes. This is what makes resending safe: a
+client unsure whether an order arrived can send it again, and at most one copy
+will ever trade. A refused order does not raise the mark, so it may be sent
+again. See [ADR 0004](adr/0004-increasing-order-ids.md).
 
 ### `OrderAccepted` (16), `OrderCancelled` (18), `OrderReplaced` (19) — 48 bytes
 

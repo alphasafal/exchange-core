@@ -84,6 +84,10 @@ engine.
 
 ## Open question
 
+> **Resolved by [0004](0004-increasing-order-ids.md)**, which also found the
+> case was worse than described here: a resend of an order that had already
+> *filled* executed a second time.
+
 **A command journaled but not acknowledged before a crash.** After recovery,
 the order exists: replay re-executes it. But the client never received an ack,
 so it might resend, or assume the order failed. A real venue resolves this with

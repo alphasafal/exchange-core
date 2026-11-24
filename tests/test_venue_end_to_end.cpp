@@ -109,7 +109,7 @@ NewOrder order(std::uint64_t id, std::uint64_t account, Side side, Price price, 
 /// A venue with order entry on an ephemeral TCP port and market data on an
 /// ephemeral UDP port, plus a subscriber already bound to it.
 struct Harness {
-    explicit Harness(bool with_journal = false) {
+    explicit Harness(bool with_journal = false, bool increasing_ids = false) {
         net::FeedConfig feed_config;
         feed_config.address = "127.0.0.1";
         feed_config.port = 0;
@@ -122,6 +122,7 @@ struct Harness {
         config.feed = feed_config;
         config.feed.port = subscriber->port();
         config.instruments = {test_instrument()};
+        config.instruments[0].increasing_order_ids = increasing_ids;
         if (with_journal) {
             config.journal = journal::WriterConfig{.directory = journal_dir.path()};
         }
@@ -219,6 +220,42 @@ TEST(VenueEndToEnd, AcknowledgesAnOrderOverTheWire) {
     EXPECT_EQ(messages[0].type, protocol::MessageType::OrderAccepted);
     EXPECT_EQ(messages[0].ack.order, OrderId{1});
     EXPECT_EQ(messages[0].ack.remaining, 50u);
+}
+
+TEST(VenueEndToEnd, RefusesAResendAndAnswersAStatusQuery) {
+    // The reconnect path a client takes after losing an acknowledgement:
+    // resend, see it refused, ask where the original stands.
+    Harness harness(false, true);
+    ASSERT_TRUE(harness.subscriber_ok);
+    ASSERT_TRUE(harness.started) << harness.venue->last_error();
+    Client client(harness.venue->order_entry_port());
+    ASSERT_TRUE(client.connected());
+
+    std::vector<std::uint8_t> request;
+    protocol::encode_new_order(request, 1, order(1, 100, Side::Buy, 10'000, 50));
+    protocol::encode_new_order(request, 2, order(1, 100, Side::Buy, 10'000, 50));
+    protocol::encode_status_request(
+        request, 3, protocol::OrderStatusRequest{OrderId{1}, AccountId{100}, InstrumentId{1}});
+    ASSERT_TRUE(client.send_all(request));
+
+    std::vector<std::uint8_t> replies;
+    ASSERT_TRUE(harness.pump_until([&] {
+        client.drain(replies);
+        return decode_all(replies).size() >= 3;
+    }));
+
+    const std::vector<protocol::Message> messages = decode_all(replies);
+    ASSERT_EQ(messages.size(), 3u);
+    EXPECT_EQ(messages[0].type, protocol::MessageType::OrderAccepted);
+    EXPECT_EQ(messages[1].type, protocol::MessageType::OrderRejected);
+    EXPECT_EQ(messages[1].reject.reason, RejectReason::DuplicateOrderId);
+    ASSERT_EQ(messages[2].type, protocol::MessageType::OrderStatus);
+    EXPECT_EQ(messages[2].status.state, OrderState::Working);
+    EXPECT_EQ(messages[2].status.remaining, 50u);
+    // The resend was refused before it was numbered, so the answer is "as of"
+    // the order itself: sequence 1 defined the instrument, 2 accepted the order.
+    EXPECT_EQ(messages[1].sequence, 0u);
+    EXPECT_EQ(messages[2].sequence, messages[0].sequence);
 }
 
 TEST(VenueEndToEnd, MatchesTwoClientsAndReportsToBothChannels) {

@@ -8,6 +8,28 @@ defect this project actually had, not a category it might have had.
 
 ## [Unreleased]
 
+### Engine and protocol
+
+- Defect: a client resending an order after a lost acknowledgement could have
+  it **executed twice**. The book refused a duplicate id only while the
+  original was still resting, so a resend of an order that had already filled
+  was accepted as new. Instruments can now require increasing order ids per
+  account (`Instrument::increasing_order_ids`, on in the simulator). A resend
+  is refused as `DuplicateOrderId` before it is numbered, so it costs no
+  journal record. The book keeps one id per account, not one per order.
+  Journal format `kRecordVersion` 3 records the flag; the replay digest covers
+  the marks. ADR 0004.
+- `OrderStatusRequest` (4) and `OrderStatus` (21): a read-only query for where
+  an order stands (`Working`, `NotWorking` or `Unknown`). It is not numbered or
+  journaled.
+- A death test kills a child process after the journal write and before the
+  acknowledgement, recovers from the journal, and checks that the order exists
+  and that its resend is refused. This closes the gap ADR 0002 left open.
+- Performance: the first version put the check inside `OrderBook::submit` and
+  made every submission ~12% slower, even with the check off (bisected; median
+  206.6 vs 181.2 ns). Moving it to the engine's pre-book gates measures 175.2
+  vs 173.5 ns, within noise.
+
 ### Benchmarks
 
 - Head-to-head comparison with Liquibook on identical input

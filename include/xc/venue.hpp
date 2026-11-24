@@ -79,6 +79,7 @@ class Venue final : public EngineListener {
   private:
     void handle(net::ConnectionId id, const protocol::Message& message);
     void publish_market_data(InstrumentId instrument);
+    void answer_status(const protocol::OrderStatusRequest& request);
     void send_session(std::span<const std::uint8_t> bytes);
 
     VenueConfig config_;

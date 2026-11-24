@@ -91,6 +91,40 @@ TEST(Protocol, RoundTripsEveryMessageType) {
     EXPECT_TRUE(cursor.empty());
 }
 
+TEST(Protocol, RoundTripsAnOrderStatusRequestAndItsAnswer) {
+    std::vector<std::uint8_t> stream;
+    encode_status_request(stream, 0, OrderStatusRequest{OrderId{9}, AccountId{2}, InstrumentId{3}});
+    encode_status(
+        stream, 41,
+        OrderStatusReport{OrderId{9}, AccountId{2}, InstrumentId{3}, OrderState::Working, 30, 70});
+
+    const DecodeResult request = decode(stream);
+    ASSERT_EQ(request.status, DecodeStatus::Ok);
+    EXPECT_EQ(request.message.type, MessageType::OrderStatusRequest);
+    EXPECT_EQ(request.message.status_request.order, OrderId{9});
+    EXPECT_EQ(request.message.status_request.account, AccountId{2});
+    EXPECT_EQ(request.message.status_request.instrument, InstrumentId{3});
+
+    const DecodeResult answer =
+        decode(std::span<const std::uint8_t>(stream).subspan(request.consumed));
+    ASSERT_EQ(answer.status, DecodeStatus::Ok);
+    EXPECT_EQ(answer.message.type, MessageType::OrderStatus);
+    EXPECT_EQ(answer.message.sequence, 41u);
+    EXPECT_EQ(answer.message.status.state, OrderState::Working);
+    EXPECT_EQ(answer.message.status.filled, 30u);
+    EXPECT_EQ(answer.message.status.remaining, 70u);
+}
+
+TEST(Protocol, RejectsAnOrderStatusWithAnUnknownState) {
+    std::vector<std::uint8_t> bytes;
+    encode_status(
+        bytes, 1,
+        OrderStatusReport{OrderId{1}, AccountId{1}, InstrumentId{1}, OrderState::NotWorking, 0, 0});
+    // The state byte follows three u64 ids in the payload.
+    bytes[FrameHeader::kSize + 24] = 9;
+    EXPECT_EQ(decode(bytes).status, DecodeStatus::Unreadable);
+}
+
 TEST(Protocol, RoundTripsAFillWithBothSides) {
     std::vector<std::uint8_t> bytes;
     encode_trade(bytes, 1, sample_fill());

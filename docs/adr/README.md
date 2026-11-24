@@ -10,6 +10,7 @@ differently.
 | [0001](0001-sequence-after-validation.md) | Assign sequence numbers after validation, before the journal | Accepted, 2026-08 |
 | [0002](0002-journal-before-matching.md) | Write the journal before matching, and journal inputs instead of outputs | Accepted, 2026-08 |
 | [0003](0003-flat-price-ladder.md) | Index price levels with a flat ladder instead of `std::map` | Accepted, 2026-10 (replaced the map) |
+| [0004](0004-increasing-order-ids.md) | Make resends safe with increasing order ids per account | Accepted, 2026-11 (resolves 0002's open question) |
 
 New records copy [template.md](template.md). A record is never edited to
 change its decision. A later record supersedes it, and the old one says so at

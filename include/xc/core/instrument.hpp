@@ -33,6 +33,20 @@ struct Instrument {
 
     SelfTradePolicy self_trade_policy = SelfTradePolicy::CancelIncoming;
 
+    /// Require each account's order ids to strictly increase.
+    ///
+    /// When set, a new order whose id is not above the highest id this account
+    /// has had accepted on this instrument is rejected as DuplicateOrderId.
+    /// That makes resending safe: a client that lost an acknowledgement in a
+    /// crash can send the same order again and it will never execute twice,
+    /// even if the original has since filled and left the book. The book keeps
+    /// one id per account to do this, not one per order, so memory does not
+    /// grow with the day's order count. See docs/adr/0004.
+    ///
+    /// Off by default so the matching core can still be checked against the
+    /// reference model on arbitrary ids; the venue turns it on.
+    bool increasing_order_ids = false;
+
     /// How many resting orders this instrument's book is sized for.
     ///
     /// Not a limit: the book grows past it rather than refusing orders, because

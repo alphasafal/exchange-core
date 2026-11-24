@@ -41,8 +41,10 @@ enum class RecordType : std::uint8_t {
 /// Version 2 added the instrument's price band. A reader rejects a version it
 /// does not know rather than guessing at the layout, so a journal written by
 /// version 1 is reported as corrupt instead of being silently misparsed with
-/// the band's bytes read as something else.
-inline constexpr std::uint8_t kRecordVersion = 2;
+/// the band's bytes read as something else. Version 3 added the instrument's
+/// increasing-order-id flag, which decides whether a resent id is refused and
+/// so has to survive into a replay for the same reason the band does.
+inline constexpr std::uint8_t kRecordVersion = 3;
 
 /// Fixed-size prefix on every record.
 ///

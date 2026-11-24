@@ -113,6 +113,7 @@ TEST(JournalRecord, RoundTripsAnInstrumentDefinition) {
     original.instrument.min_quantity = 100;
     original.instrument.display_exponent = 4;
     original.instrument.self_trade_policy = SelfTradePolicy::DecrementBoth;
+    original.instrument.increasing_order_ids = true;
 
     const DecodeResult decoded = decode(encoded(original));
     ASSERT_EQ(decoded.status, DecodeStatus::Ok);
@@ -127,6 +128,10 @@ TEST(JournalRecord, RoundTripsAnInstrumentDefinition) {
     EXPECT_EQ(decoded.record.instrument.min_price, 50);
     EXPECT_EQ(decoded.record.instrument.max_price, 5'000);
     EXPECT_EQ(decoded.record.instrument.self_trade_policy, SelfTradePolicy::DecrementBoth);
+    // Asserted for the same reason as the band: it decides whether a resent
+    // order is refused, so a replay that lost it would accept a resend the
+    // original venue refused.
+    EXPECT_TRUE(decoded.record.instrument.increasing_order_ids);
 }
 
 TEST(JournalRecord, RoundTripsAnEmptySymbol) {

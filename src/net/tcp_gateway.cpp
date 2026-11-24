@@ -202,11 +202,11 @@ void TcpGateway::read_ready(Connection& connection) {
             // A connection may act for exactly one account. Not authentication
             // -- the account is still whatever the client claimed first -- but
             // it does stop one session interleaving orders for several firms.
-            const AccountId claimed = decoded.message.new_order.account.valid()
-                                          ? decoded.message.new_order.account
-                                      : decoded.message.cancel_order.account.valid()
-                                          ? decoded.message.cancel_order.account
-                                          : decoded.message.replace_order.account;
+            const protocol::Message& m = decoded.message;
+            const AccountId claimed = m.new_order.account.valid()       ? m.new_order.account
+                                      : m.cancel_order.account.valid()  ? m.cancel_order.account
+                                      : m.replace_order.account.valid() ? m.replace_order.account
+                                                                        : m.status_request.account;
             if (claimed.valid()) {
                 if (!live->account.valid()) {
                     live->account = claimed;

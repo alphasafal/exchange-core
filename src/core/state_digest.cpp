@@ -21,6 +21,23 @@ void feed_book(Digest& digest, const OrderBook& book) {
         digest.feed(order.remaining);
         digest.feed(order.sequence);
     });
+
+    // The per-account order id marks decide whether a future order is
+    // accepted, so a replay that got them wrong would diverge later even with
+    // an identical book. The table's slot order depends on insertion history,
+    // so the entries are combined with an order-independent sum of per-entry
+    // digests rather than fed in sequence.
+    std::uint64_t marks = 0;
+    std::uint64_t mark_count = 0;
+    book.for_each_order_id_mark([&](AccountId account, OrderId highest) {
+        Digest entry;
+        entry.feed(account.value());
+        entry.feed(highest.value());
+        marks += entry.value();
+        ++mark_count;
+    });
+    digest.feed(mark_count);
+    digest.feed(marks);
 }
 
 }  // namespace
